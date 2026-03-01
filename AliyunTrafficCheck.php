@@ -294,7 +294,7 @@ class AliyunTrafficCheck
                         $this->db->addLog('info', "执行定时启动 [{$account['access_key_id']}]");
 
                         $mailRes = $this->notificationService->notifySchedule("定时启动", $account, "计划任务已触发，实例正在启动。");
-                        $this->logMailResult($mailRes, $account['access_key_id']);
+                        $this->logNotificationResult($mailRes, $account['access_key_id']);
 
                         $forceRefresh = true;
                         $statusTransformed = true;
@@ -306,7 +306,7 @@ class AliyunTrafficCheck
                         $this->db->addLog('info', "执行定时停止 [{$account['access_key_id']}]");
 
                         $mailRes = $this->notificationService->notifySchedule("定时停止", $account, "计划任务已触发，实例已停止。");
-                        $this->logMailResult($mailRes, $account['access_key_id']);
+                        $this->logNotificationResult($mailRes, $account['access_key_id']);
 
                         $forceRefresh = true;
                         $statusTransformed = true;
@@ -388,7 +388,7 @@ class AliyunTrafficCheck
                     }
 
                     $mailRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $traffic, $usagePercent, implode(',', $actions), $threshold);
-                    $this->logMailResult($mailRes, $account['access_key_id']);
+                    $this->logNotificationResult($mailRes, $account['access_key_id']);
                 }
             }
 
@@ -405,7 +405,7 @@ class AliyunTrafficCheck
                                 $this->db->addLog('info', "执行保活启动 [{$account['access_key_id']}]");
 
                                 $mailRes = $this->notificationService->notifySchedule("保活启动", $account, "检测到实例在工作时段非预期关机，已尝试自动启动。");
-                                $this->logMailResult($mailRes, $account['access_key_id']);
+                                $this->logNotificationResult($mailRes, $account['access_key_id']);
 
                                 $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
                                 $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
@@ -549,12 +549,12 @@ class AliyunTrafficCheck
         return $this->notificationService->sendTestWebhook($data);
     }
 
-    private function logMailResult($result, $key)
+    private function logNotificationResult($result, $key)
     {
         if ($result === true) {
-            $this->db->addLog('info', "邮件发送成功 [$key]");
+            $this->db->addLog('info', "通知推送成功 [$key]");
         } elseif ($result !== false && $result !== true) {
-            $this->db->addLog('warning', "邮件发送失败 [$key]: " . strip_tags($result));
+            $this->db->addLog('warning', "通知推送异常/失败 [$key]: " . strip_tags($result));
         }
     }
 
