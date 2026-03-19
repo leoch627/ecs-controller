@@ -203,12 +203,12 @@
                     <div v-if="item.cost && item.cost.enabled" class="flex justify-between items-center">
                         <span class="text-sm font-medium text-gray-500">本月费用</span>
                         <span v-if="!item.cost.error" class="text-xs font-medium">
-                            <span v-if="item.cost.monthly_cost !== null" class="font-bold text-orange-500">¥{{
+                            <span v-if="item.cost.monthly_cost !== null" class="font-bold text-orange-500">{{ item.cost.currency === 'USD' ? '$' : '¥' }}{{
                                 item.cost.monthly_cost }}</span>
                             <span v-if="item.cost.monthly_cost !== null && item.cost.balance !== null"
                                 class="text-gray-300 mx-1">|</span>
                             <span v-if="item.cost.balance !== null" class="text-gray-400">余<span class="font-bold"
-                                    :class="parseFloat(item.cost.balance) < 100 ? 'text-red-500' : 'text-green-600'">¥{{
+                                    :class="parseFloat(item.cost.balance) < 100 ? 'text-red-500' : 'text-green-600'">{{ item.cost.currency === 'USD' ? '$' : '¥' }}{{
                                     item.cost.balance }}</span></span>
                         </span>
                         <span v-else class="text-[10px] text-gray-400">{{ item.cost.error }}</span>
