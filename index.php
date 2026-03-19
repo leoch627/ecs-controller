@@ -124,10 +124,14 @@ if ($action === 'send_test_webhook') {
 if ($action === 'refresh_account') {
     $data = json_decode(file_get_contents('php://input'), true);
     $id = $data['id'] ?? 0;
-    if ($app->refreshAccount($id)) {
-        echo json_encode(['success' => true]);
-    } else {
+    $result = $app->refreshAccount($id);
+    if ($result === false) {
         echo json_encode(['success' => false, 'message' => 'Refresh failed']);
+    } elseif (is_array($result)) {
+        // 流量/状态刷新成功，但账单获取失败
+        echo json_encode($result);
+    } else {
+        echo json_encode(['success' => true]);
     }
     exit;
 }

@@ -534,7 +534,55 @@ class AliyunTrafficCheck
             $this->db->addDailyStat($targetAccount['id'], $traffic);
         }
 
-        return $this->configManager->updateAccountStatus($id, $traffic, $status, $currentTime);
+        $this->configManager->updateAccountStatus($id, $traffic, $status, $currentTime);
+
+        // 刷新账单数据：仅在启用费用监控 且 无有效缓存时调用 BSS API
+        $billingError = null;
+        $billingEnabled = $this->configManager->get('enable_billing', '0') === '1';
+        if ($billingEnabled) {
+            $billingCycle = date('Y-m');
+
+            // 余额：无有效缓存时重新获取
+            $balanceCache = $this->db->getBillingCache($targetAccount['id'], 'balance', '', 21600);
+            if (!$balanceCache) {
+                try {
+                    $balance = $this->aliyunService->getAccountBalance(
+                        $targetAccount['access_key_id'],
+                        $targetAccount['access_key_secret'],
+                        $targetAccount['region_id']
+                    );
+                    $this->db->setBillingCache($targetAccount['id'], 'balance', '', $balance);
+                } catch (\Exception $e) {
+                    $billingError = '余额查询失败: ' . $e->getMessage();
+                }
+            }
+
+            // 实例账单：无有效缓存时重新获取
+            if (!empty($targetAccount['instance_id'])) {
+                $billCache = $this->db->getBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, 21600);
+                if (!$billCache) {
+                    try {
+                        $bill = $this->aliyunService->getInstanceBill(
+                            $targetAccount['access_key_id'],
+                            $targetAccount['access_key_secret'],
+                            $targetAccount['instance_id'],
+                            $billingCycle,
+                            $targetAccount['region_id']
+                        );
+                        $this->db->setBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, $bill);
+                    } catch (\Exception $e) {
+                        $billingError = ($billingError ? $billingError . '; ' : '') . '账单查询失败: ' . $e->getMessage();
+                    }
+                }
+            }
+        }
+
+        if ($billingError) {
+            $this->db->addLog('warning', "账单刷新异常 [{$targetAccount['access_key_id']}]: {$billingError}");
+            return ['success' => true, 'billing_error' => $billingError];
+        }
+
+        return true;
     }
 
     public function sendTestEmail($to)
