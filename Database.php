@@ -137,6 +137,7 @@ class Database
         $this->ensureColumn('accounts', 'updated_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'last_keep_alive_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'remark', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'site_type', "TEXT DEFAULT 'china'");
 
         $this->migrateStatsToAccountId();
     }

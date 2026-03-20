@@ -159,7 +159,8 @@ class AliyunTrafficCheck
                     'startTime' => $row['start_time'],
                     'stopTime' => $row['stop_time']
                 ],
-                'remark' => $row['remark'] ?? ''
+                'remark' => $row['remark'] ?? '',
+                'siteType' => $row['site_type'] ?? 'china'
             ];
         }
 
@@ -549,7 +550,7 @@ class AliyunTrafficCheck
                     $balance = $this->aliyunService->getAccountBalance(
                         $targetAccount['access_key_id'],
                         $targetAccount['access_key_secret'],
-                        $targetAccount['region_id']
+                        $targetAccount['site_type'] ?? 'china'
                     );
                     $this->db->setBillingCache($targetAccount['id'], 'balance', '', $balance);
                 } catch (\Exception $e) {
@@ -567,7 +568,7 @@ class AliyunTrafficCheck
                             $targetAccount['access_key_secret'],
                             $targetAccount['instance_id'],
                             $billingCycle,
-                            $targetAccount['region_id']
+                            $targetAccount['site_type'] ?? 'china'
                         );
                         $this->db->setBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, $bill);
                     } catch (\Exception $e) {
@@ -721,7 +722,7 @@ class AliyunTrafficCheck
                 $balance = $this->aliyunService->getAccountBalance(
                     $account['access_key_id'],
                     $account['access_key_secret'],
-                    $account['region_id']
+                    $account['site_type'] ?? 'china'
                 );
                 $costInfo['balance'] = $balance['AvailableAmount'];
                 $costInfo['currency'] = $balance['Currency'] ?? 'CNY';
@@ -743,7 +744,7 @@ class AliyunTrafficCheck
                         $account['access_key_secret'],
                         $account['instance_id'],
                         $billingCycle,
-                        $account['region_id']
+                        $account['site_type'] ?? 'china'
                     );
                     $costInfo['monthly_cost'] = $bill['TotalCost'];
                     $this->db->setBillingCache($account['id'], 'instance_bill', $billingCycle, $bill);

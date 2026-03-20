@@ -135,8 +135,8 @@ class ConfigManager
             }
 
             $keptIds = [];
-            $insertStmt = $this->db->prepare("INSERT INTO accounts (access_key_id, access_key_secret, region_id, instance_id, max_traffic, schedule_enabled, start_time, stop_time, remark, traffic_used, instance_status, updated_at, last_keep_alive_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'Unknown', 0, 0)");
-            $updateStmt = $this->db->prepare("UPDATE accounts SET access_key_secret = ?, region_id = ?, instance_id = ?, max_traffic = ?, schedule_enabled = ?, start_time = ?, stop_time = ?, remark = ? WHERE id = ?");
+            $insertStmt = $this->db->prepare("INSERT INTO accounts (access_key_id, access_key_secret, region_id, instance_id, max_traffic, schedule_enabled, start_time, stop_time, remark, site_type, traffic_used, instance_status, updated_at, last_keep_alive_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'Unknown', 0, 0)");
+            $updateStmt = $this->db->prepare("UPDATE accounts SET access_key_secret = ?, region_id = ?, instance_id = ?, max_traffic = ?, schedule_enabled = ?, start_time = ?, stop_time = ?, remark = ?, site_type = ? WHERE id = ?");
 
             foreach ($newAccounts as $acc) {
                 $key = $acc['AccessKeyId'];
@@ -152,7 +152,8 @@ class ConfigManager
                     ($acc['schedule']['enabled'] ?? false) ? 1 : 0,
                     $acc['schedule']['startTime'] ?? '',
                     $acc['schedule']['stopTime'] ?? '',
-                    $acc['remark'] ?? ''
+                    $acc['remark'] ?? '',
+                    $acc['siteType'] ?? 'china'
                 ];
 
                 if (isset($existingMap[$compositeKey])) {
@@ -207,7 +208,7 @@ class ConfigManager
                 $this->db->exec("DELETE FROM accounts");
                 $this->db->exec("DELETE FROM sqlite_sequence WHERE name='accounts'");
 
-                $insertStmt = $this->db->prepare("INSERT INTO accounts (id, access_key_id, access_key_secret, region_id, instance_id, max_traffic, schedule_enabled, start_time, stop_time, remark, traffic_used, instance_status, updated_at, last_keep_alive_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $insertStmt = $this->db->prepare("INSERT INTO accounts (id, access_key_id, access_key_secret, region_id, instance_id, max_traffic, schedule_enabled, start_time, stop_time, remark, site_type, traffic_used, instance_status, updated_at, last_keep_alive_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
                 $newId = 1;
                 foreach ($rows as $row) {
@@ -222,6 +223,7 @@ class ConfigManager
                         $row['start_time'],
                         $row['stop_time'],
                         $row['remark'] ?? '',
+                        $row['site_type'] ?? 'china',
                         $row['traffic_used'],
                         $row['instance_status'],
                         $row['updated_at'],

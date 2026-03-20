@@ -89,12 +89,13 @@ class AliyunService
 
     /**
      * 获取 BSS 费用中心 API 的 regionId 和 endpoint
-     * 中国站（国内区域）: cn-hangzhou + business.aliyuncs.com
-     * 国际站（海外区域）: ap-southeast-1 + business.ap-southeast-1.aliyuncs.com
+     * 中国站: cn-hangzhou + business.aliyuncs.com
+     * 国际站: ap-southeast-1 + business.ap-southeast-1.aliyuncs.com
+     * @param string $siteType 'china' 或 'international'
      */
-    private function getBssEndpoint($targetRegion)
+    private function getBssEndpoint($siteType = 'china')
     {
-        if ($this->isOverseas($targetRegion)) {
+        if ($siteType === 'international') {
             return [
                 'regionId' => 'ap-southeast-1',
                 'host'     => 'business.ap-southeast-1.aliyuncs.com'
@@ -257,14 +258,14 @@ class AliyunService
      * @return array ['AvailableAmount' => '...', 'Currency' => 'CNY']
      * @throws \Exception
      */
-    public function getAccountBalance($key, $secret, $targetRegion = 'cn-hangzhou')
+    public function getAccountBalance($key, $secret, $siteType = 'china')
     {
         $cacheKey = md5($key);
         if (isset($this->balanceCache[$cacheKey])) {
             return $this->balanceCache[$cacheKey];
         }
 
-        $bss = $this->getBssEndpoint($targetRegion);
+        $bss = $this->getBssEndpoint($siteType);
 
         $result = $this->executeWithRetry(function () use ($key, $secret, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
@@ -303,9 +304,9 @@ class AliyunService
      * @return array ['TotalCost' => float, 'Items' => [...]]
      * @throws \Exception
      */
-    public function getInstanceBill($key, $secret, $instanceId, $billingCycle, $targetRegion = 'cn-hangzhou')
+    public function getInstanceBill($key, $secret, $instanceId, $billingCycle, $siteType = 'china')
     {
-        $bss = $this->getBssEndpoint($targetRegion);
+        $bss = $this->getBssEndpoint($siteType);
 
         $result = $this->executeWithRetry(function () use ($key, $secret, $instanceId, $billingCycle, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
@@ -363,9 +364,9 @@ class AliyunService
      * @return array ['TotalCost' => float, 'Products' => [...]]
      * @throws \Exception
      */
-    public function getBillOverview($key, $secret, $billingCycle, $targetRegion = 'cn-hangzhou')
+    public function getBillOverview($key, $secret, $billingCycle, $siteType = 'china')
     {
-        $bss = $this->getBssEndpoint($targetRegion);
+        $bss = $this->getBssEndpoint($siteType);
 
         $result = $this->executeWithRetry(function () use ($key, $secret, $billingCycle, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)

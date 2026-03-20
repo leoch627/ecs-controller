@@ -801,11 +801,20 @@
                                     </div>
                                 </div>
 
-                                <div class="mt-4 space-y-1">
-                                    <label class="text-xs font-medium text-gray-500 ml-2">备注 <span
-                                            class="text-gray-400">(可选)</span></label>
-                                    <input v-model="acc.remark" placeholder="为该实例添加备注说明"
-                                        class="w-full glass-input rounded-xl px-4 py-2 text-sm">
+                                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="space-y-1">
+                                        <label class="text-xs font-medium text-gray-500 ml-2">站点类型</label>
+                                        <select v-model="acc.siteType" class="w-full glass-input rounded-xl px-4 py-2 text-sm appearance-none cursor-pointer">
+                                            <option value="china">中国站 (CNY ¥)</option>
+                                            <option value="international">国际站 (USD $)</option>
+                                        </select>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-xs font-medium text-gray-500 ml-2">备注 <span
+                                                class="text-gray-400">(可选)</span></label>
+                                        <input v-model="acc.remark" placeholder="为该实例添加备注说明"
+                                            class="w-full glass-input rounded-xl px-4 py-2 text-sm">
+                                    </div>
                                 </div>
 
                                 <div class="mt-6 pt-4 border-t border-gray-200/50">
@@ -1356,6 +1365,7 @@
                             if (!acc.schedule) acc.schedule = { enabled: false, startTime: '', stopTime: '' };
                             if (typeof acc.maxTraffic === 'undefined') acc.maxTraffic = 200;
                             if (typeof acc.remark === 'undefined') acc.remark = '';
+                            if (typeof acc.siteType === 'undefined') acc.siteType = 'china';
                         });
 
                         if (!data.Notification) {
@@ -1468,7 +1478,7 @@
 
                 const addAccount = () => {
                     if (!config.value.Accounts) config.value.Accounts = [];
-                    config.value.Accounts.push({ AccessKeyId: '', AccessKeySecret: '', maxTraffic: 200, regionId: '', instanceId: '', remark: '', schedule: { enabled: false, startTime: '', stopTime: '' } });
+                    config.value.Accounts.push({ AccessKeyId: '', AccessKeySecret: '', maxTraffic: 200, regionId: '', instanceId: '', remark: '', siteType: 'china', schedule: { enabled: false, startTime: '', stopTime: '' } });
                 };
 
                 const removeAccount = (index) => { if (confirm('确定删除该账号配置？')) config.value.Accounts.splice(index, 1); };
