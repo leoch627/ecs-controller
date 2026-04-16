@@ -171,6 +171,10 @@ class Database
             system_disk_size INTEGER DEFAULT 0,
             instance_id TEXT DEFAULT '',
             public_ip TEXT DEFAULT '',
+            public_ip_mode TEXT DEFAULT 'ecs_public_ip',
+            eip_allocation_id TEXT DEFAULT '',
+            eip_address TEXT DEFAULT '',
+            eip_managed INTEGER DEFAULT 0,
             login_user TEXT DEFAULT '',
             login_password TEXT DEFAULT '',
             status TEXT NOT NULL,
@@ -194,12 +198,20 @@ class Database
         $this->ensureColumn('accounts', 'instance_type', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'internet_max_bandwidth_out', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'public_ip', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'public_ip_mode', "TEXT DEFAULT 'ecs_public_ip'");
+        $this->ensureColumn('accounts', 'eip_allocation_id', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'eip_address', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'eip_managed', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'private_ip', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'cpu', "INTEGER DEFAULT 0");
         $this->ensureColumn('accounts', 'memory', "INTEGER DEFAULT 0");
         $this->ensureColumn('accounts', 'os_name', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'stopped_mode', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'health_status', "TEXT DEFAULT 'Unknown'");
+        $this->ensureColumn('ecs_create_tasks', 'public_ip_mode', "TEXT DEFAULT 'ecs_public_ip'");
+        $this->ensureColumn('ecs_create_tasks', 'eip_allocation_id', "TEXT DEFAULT ''");
+        $this->ensureColumn('ecs_create_tasks', 'eip_address', "TEXT DEFAULT ''");
+        $this->ensureColumn('ecs_create_tasks', 'eip_managed', 'INTEGER DEFAULT 0');
 
         $this->migrateStatsToAccountId();
     }
@@ -553,6 +565,7 @@ class Database
             'zone_id', 'image_id', 'os_label', 'instance_name', 'vpc_id', 'vswitch_id',
             'security_group_id', 'internet_max_bandwidth_out', 'system_disk_category',
             'system_disk_size', 'instance_id', 'public_ip', 'login_user', 'login_password',
+            'public_ip_mode', 'eip_allocation_id', 'eip_address', 'eip_managed',
             'status', 'step', 'error_message', 'payload', 'updated_at'
         ];
 

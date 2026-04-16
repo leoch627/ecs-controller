@@ -642,9 +642,11 @@ class AliyunService
                             'instanceType' => $instance['InstanceType'] ?? '',
                             'cpu' => $instance['Cpu'] ?? 0,
                             'memory' => $instance['Memory'] ?? 0,
-                            'internetMaxBandwidthOut' => (int) ($instance['InternetMaxBandwidthOut'] ?? 0),
+                            'internetMaxBandwidthOut' => (int) (($instance['EipAddress']['Bandwidth'] ?? 0) ?: ($instance['InternetMaxBandwidthOut'] ?? 0)),
                             'osName' => $instance['OSName'] ?? '',
                             'publicIp' => $instance['PublicIpAddress']['IpAddress'][0] ?? $instance['EipAddress']['IpAddress'] ?? '',
+                            'eipAllocationId' => $instance['EipAddress']['AllocationId'] ?? '',
+                            'eipAddress' => $instance['EipAddress']['IpAddress'] ?? '',
                             'privateIp' => $instance['VpcAttributes']['PrivateIpAddress']['IpAddress'][0] ?? '',
                             'stoppedMode' => $instance['StoppedMode'] ?? '',
                             'chargeType' => $instance['InstanceChargeType'] ?? ''
@@ -679,7 +681,11 @@ class AliyunService
     {
         $regionId = trim((string) ($request['regionId'] ?? $account['region_id'] ?? ''));
         $instanceType = trim((string) ($request['instanceType'] ?? '')) ?: 'ecs.e-c4m1.large';
-        $osKey = trim((string) ($request['osKey'] ?? 'ubuntu_22'));
+        $osKey = trim((string) ($request['osKey'] ?? 'debian_12'));
+        $publicIpMode = trim((string) ($request['publicIpMode'] ?? 'ecs_public_ip'));
+        if (!in_array($publicIpMode, ['ecs_public_ip', 'eip'], true)) {
+            $publicIpMode = 'ecs_public_ip';
+        }
         $instanceName = trim((string) ($request['instanceName'] ?? ''));
         if ($instanceName === '') {
             $instanceName = 'launch-' . date('Ymd-His');
@@ -723,6 +729,8 @@ class AliyunService
             'chargeType' => 'PostPaid',
             'internetChargeType' => 'PayByTraffic',
             'internetMaxBandwidthOut' => $bandwidth,
+            'publicIpMode' => $publicIpMode,
+            'publicIpModeLabel' => $publicIpMode === 'eip' ? 'EIP 弹性公网 IP' : 'ECS 普通公网 IP',
             'systemDisk' => [
                 'category' => $diskCategory,
                 'size' => $diskSize,
@@ -756,6 +764,9 @@ class AliyunService
                 'trafficNote' => '公网按使用流量计费，并按 CDT 兼容方式创建。'
             ],
             'warnings' => array_values(array_filter([
+                $publicIpMode === 'eip'
+                    ? 'EIP 模式会先创建无普通公网 IP 的 ECS，再申请并绑定 EIP；停机不会释放 EIP，释放实例时会自动释放系统创建的 EIP。'
+                    : 'ECS 普通公网 IP 由实例直接分配，停机后再启动可能变化；如需可控更换 IP，建议选择 EIP 模式。',
                 '公网带宽峰值会自动尝试最高可用值，若账号配额或规格限制不支持，会自动降级重试。',
                 "系统盘将严格按 {$diskSize} GB 创建；当前 API 返回范围为 {$diskRange['min']}-{$diskRange['max']} {$diskRange['unit']}，超出范围会直接报错。",
                 '文件备份默认不启用；如需备份，请创建后在阿里云控制台单独开启。',
@@ -792,19 +803,15 @@ class AliyunService
         $this->authorizeOpenSecurityGroupRules($key, $secret, $regionId, $securityGroup['SecurityGroupId']);
 
         $bandwidthCandidates = $this->bandwidthCandidates((int) ($preview['internetMaxBandwidthOut'] ?? 100));
-        $diskCategories = array_unique(array_filter([
-            $preview['systemDisk']['category'] ?? 'cloud_essd',
-            'cloud_auto',
-            'cloud_essd',
-            'cloud_efficiency',
-            'cloud'
-        ]));
+        $diskCategories = array_unique(array_filter([$preview['systemDisk']['category'] ?? 'cloud_essd_entry']));
+        $publicIpMode = ($preview['publicIpMode'] ?? 'ecs_public_ip') === 'eip' ? 'eip' : 'ecs_public_ip';
         // 系统盘成本敏感，严格使用用户确认的值；若阿里云拒绝，不自动放大。
         $diskSize = $this->normalizeSystemDiskSize($preview['systemDisk']['size'] ?? 20, $preview['systemDisk'] ?? []);
         $lastError = null;
 
         foreach ($bandwidthCandidates as $bandwidth) {
             foreach ($diskCategories as $diskCategory) {
+                $allocatedEip = null;
                 try {
                     $this->emitProgress($progress, "创建 ECS（{$bandwidth} Mbps / {$diskCategory}）");
                     $instanceIds = $this->runInstance(
@@ -819,7 +826,7 @@ class AliyunService
                             'vSwitchId' => $vswitch['VSwitchId'],
                             'instanceName' => $preview['instanceName'],
                             'password' => $password,
-                            'internetMaxBandwidthOut' => $bandwidth,
+                            'internetMaxBandwidthOut' => $publicIpMode === 'eip' ? 0 : $bandwidth,
                             'systemDiskCategory' => $diskCategory,
                             'systemDiskSize' => $diskSize
                         ]
@@ -833,10 +840,26 @@ class AliyunService
                     $this->emitProgress($progress, '等待实例启动');
                     $instance = $this->waitInstanceReady($key, $secret, $regionId, $instanceId);
 
+                    if ($publicIpMode === 'eip') {
+                        $this->emitProgress($progress, "申请 EIP（{$bandwidth} Mbps）");
+                        $allocatedEip = $this->allocateEipAddress($key, $secret, $regionId, $bandwidth, $preview['instanceName']);
+                        $this->emitProgress($progress, '绑定 EIP');
+                        $this->associateEipAddress($key, $secret, $regionId, $allocatedEip['allocationId'], $instanceId);
+                        $this->waitEipStatus($key, $secret, $regionId, $allocatedEip['allocationId'], 'InUse');
+                        $instance = $this->waitInstanceReady($key, $secret, $regionId, $instanceId);
+                        $instance['publicIp'] = $allocatedEip['ipAddress'] ?: ($instance['publicIp'] ?? '');
+                        $instance['eipAllocationId'] = $allocatedEip['allocationId'];
+                        $instance['eipAddress'] = $allocatedEip['ipAddress'];
+                    }
+
                     return [
                         'instanceId' => $instanceId,
                         'publicIp' => $instance['publicIp'] ?? '',
                         'privateIp' => $instance['privateIp'] ?? '',
+                        'publicIpMode' => $publicIpMode,
+                        'eipAllocationId' => $instance['eipAllocationId'] ?? '',
+                        'eipAddress' => $instance['eipAddress'] ?? '',
+                        'eipManaged' => $publicIpMode === 'eip',
                         'status' => $instance['status'] ?? 'Unknown',
                         'instanceName' => $preview['instanceName'],
                         'instanceType' => $instanceType,
@@ -850,6 +873,9 @@ class AliyunService
                         'loginPassword' => $password
                     ];
                 } catch (\Exception $e) {
+                    if ($allocatedEip && !empty($allocatedEip['allocationId'])) {
+                        $this->releaseEipAddressSilently($key, $secret, $regionId, $allocatedEip['allocationId']);
+                    }
                     $lastError = $e;
                     $message = $e->getMessage();
                     if ($this->isDiskSizeError($message)) {
@@ -949,7 +975,7 @@ class AliyunService
             'centos_stream_9' => ['label' => 'CentOS Stream 9', 'osType' => 'linux', 'platform' => 'CentOS', 'patterns' => ['centos_stream_9', 'centos stream 9']],
             'windows_2022' => ['label' => 'Windows Server 2022', 'osType' => 'windows', 'platform' => 'Windows Server', 'patterns' => ['win2022', 'windows server 2022']]
         ];
-        $profile = $profiles[$osKey] ?? $profiles['ubuntu_22'];
+        $profile = $profiles[$osKey] ?? $profiles['debian_12'];
         $architecture = $this->normalizeImageArchitecture($cpuArchitecture);
 
         $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $profile, $architecture) {
@@ -1248,6 +1274,270 @@ class AliyunService
         return $result['InstanceIdSets']['InstanceIdSet'] ?? [];
     }
 
+    private function allocateEipAddress($key, $secret, $regionId, $bandwidth, $instanceName)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $bandwidth, $instanceName) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Vpc')
+                ->scheme('https')
+                ->version('2016-04-28')
+                ->action('AllocateEipAddress')
+                ->method('POST')
+                ->host($this->vpcHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'Bandwidth' => max(1, (int) $bandwidth),
+                        'InternetChargeType' => 'PayByTraffic',
+                        'Name' => $instanceName . '-eip',
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 20.0
+                ])
+                ->request();
+        }, 'allocateEipAddress');
+
+        $allocationId = $result['AllocationId'] ?? '';
+        if ($allocationId === '') {
+            throw new \Exception('EIP 申请成功但未返回 AllocationId');
+        }
+
+        $ipAddress = $result['EipAddress'] ?? '';
+        if ($ipAddress === '') {
+            $detail = $this->waitEipStatus($key, $secret, $regionId, $allocationId, 'Available', 6);
+            $ipAddress = $detail['IpAddress'] ?? '';
+        }
+
+        return [
+            'allocationId' => $allocationId,
+            'ipAddress' => $ipAddress
+        ];
+    }
+
+    private function associateEipAddress($key, $secret, $regionId, $allocationId, $instanceId)
+    {
+        if ($allocationId === '' || $instanceId === '') {
+            throw new \Exception('EIP 绑定参数缺失');
+        }
+
+        return $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId, $instanceId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Vpc')
+                ->scheme('https')
+                ->version('2016-04-28')
+                ->action('AssociateEipAddress')
+                ->method('POST')
+                ->host($this->vpcHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'AllocationId' => $allocationId,
+                        'InstanceId' => $instanceId,
+                        'InstanceType' => 'EcsInstance'
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 20.0
+                ])
+                ->request();
+        }, 'associateEipAddress');
+    }
+
+    private function unassociateEipAddress($key, $secret, $regionId, $allocationId, $instanceId)
+    {
+        if ($allocationId === '') {
+            return true;
+        }
+
+        try {
+            $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId, $instanceId) {
+                $this->setDefaultClient($key, $secret, $regionId);
+
+                $query = [
+                    'RegionId' => $regionId,
+                    'AllocationId' => $allocationId,
+                    'InstanceType' => 'EcsInstance'
+                ];
+                if ($instanceId !== '') {
+                    $query['InstanceId'] = $instanceId;
+                }
+
+                return AlibabaCloud::rpc()
+                    ->product('Vpc')
+                    ->scheme('https')
+                    ->version('2016-04-28')
+                    ->action('UnassociateEipAddress')
+                    ->method('POST')
+                    ->host($this->vpcHost($regionId))
+                    ->options([
+                        'query' => $query,
+                        'connect_timeout' => 5.0,
+                        'timeout' => 20.0
+                    ])
+                    ->request();
+            }, 'unassociateEipAddress');
+        } catch (\Exception $e) {
+            $message = $e->getMessage();
+            if (
+                stripos($message, 'IncorrectEipStatus') === false
+                && stripos($message, 'InvalidAllocationId.NotFound') === false
+                && stripos($message, 'not exist') === false
+            ) {
+                throw $e;
+            }
+        }
+
+        return true;
+    }
+
+    private function releaseEipAddress($key, $secret, $regionId, $allocationId)
+    {
+        if ($allocationId === '') {
+            return true;
+        }
+
+        try {
+            $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId) {
+                $this->setDefaultClient($key, $secret, $regionId);
+
+                return AlibabaCloud::rpc()
+                    ->product('Vpc')
+                    ->scheme('https')
+                    ->version('2016-04-28')
+                    ->action('ReleaseEipAddress')
+                    ->method('POST')
+                    ->host($this->vpcHost($regionId))
+                    ->options([
+                        'query' => [
+                            'RegionId' => $regionId,
+                            'AllocationId' => $allocationId
+                        ],
+                        'connect_timeout' => 5.0,
+                        'timeout' => 20.0
+                    ])
+                    ->request();
+            }, 'releaseEipAddress');
+        } catch (\Exception $e) {
+            $message = $e->getMessage();
+            if (stripos($message, 'InvalidAllocationId.NotFound') === false && stripos($message, 'not exist') === false) {
+                throw $e;
+            }
+        }
+
+        return true;
+    }
+
+    private function releaseEipAddressSilently($key, $secret, $regionId, $allocationId)
+    {
+        try {
+            $this->unassociateEipAddress($key, $secret, $regionId, $allocationId, '');
+            $this->waitEipStatus($key, $secret, $regionId, $allocationId, 'Available', 6);
+            $this->releaseEipAddress($key, $secret, $regionId, $allocationId);
+        } catch (\Exception $e) {
+            // 创建失败回滚场景不覆盖原始错误，后台日志由调用方记录。
+        }
+    }
+
+    private function describeEipAddress($key, $secret, $regionId, $allocationId)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Vpc')
+                ->scheme('https')
+                ->version('2016-04-28')
+                ->action('DescribeEipAddresses')
+                ->method('POST')
+                ->host($this->vpcHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'AllocationId' => $allocationId
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'describeEipAddress');
+
+        return $result['EipAddresses']['EipAddress'][0] ?? null;
+    }
+
+    private function waitEipStatus($key, $secret, $regionId, $allocationId, $targetStatus, $maxAttempts = 12)
+    {
+        $last = null;
+        for ($i = 0; $i < $maxAttempts; $i++) {
+            sleep($i === 0 ? 2 : 4);
+            $last = $this->describeEipAddress($key, $secret, $regionId, $allocationId);
+            if (!$last) {
+                continue;
+            }
+            if (($last['Status'] ?? '') === $targetStatus) {
+                return $last;
+            }
+        }
+
+        return $last;
+    }
+
+    public function releaseManagedEip($account)
+    {
+        $allocationId = trim((string) ($account['eip_allocation_id'] ?? ''));
+        if (($account['public_ip_mode'] ?? '') !== 'eip' || empty($account['eip_managed']) || $allocationId === '') {
+            return false;
+        }
+
+        $key = $account['access_key_id'];
+        $secret = $account['access_key_secret'];
+        $regionId = $account['region_id'];
+        $this->unassociateEipAddress($key, $secret, $regionId, $allocationId, $account['instance_id'] ?? '');
+        $this->waitEipStatus($key, $secret, $regionId, $allocationId, 'Available', 8);
+        $this->releaseEipAddress($key, $secret, $regionId, $allocationId);
+        return true;
+    }
+
+    public function replaceManagedEip($account)
+    {
+        $oldAllocationId = trim((string) ($account['eip_allocation_id'] ?? ''));
+        if (($account['public_ip_mode'] ?? '') !== 'eip' || empty($account['eip_managed']) || $oldAllocationId === '') {
+            throw new \Exception('当前实例不是系统托管 EIP，无法更换公网 IP');
+        }
+
+        $key = $account['access_key_id'];
+        $secret = $account['access_key_secret'];
+        $regionId = $account['region_id'];
+        $instanceId = $account['instance_id'] ?? '';
+        $bandwidth = max(1, (int) ($account['internet_max_bandwidth_out'] ?? 100));
+
+        $newEip = $this->allocateEipAddress($key, $secret, $regionId, $bandwidth, ($account['instance_name'] ?? $instanceId) . '-replace');
+
+        try {
+            $this->unassociateEipAddress($key, $secret, $regionId, $oldAllocationId, $instanceId);
+            $this->waitEipStatus($key, $secret, $regionId, $oldAllocationId, 'Available', 8);
+            $this->associateEipAddress($key, $secret, $regionId, $newEip['allocationId'], $instanceId);
+            $this->waitEipStatus($key, $secret, $regionId, $newEip['allocationId'], 'InUse', 12);
+            $this->releaseEipAddress($key, $secret, $regionId, $oldAllocationId);
+        } catch (\Exception $e) {
+            $this->releaseEipAddressSilently($key, $secret, $regionId, $newEip['allocationId'] ?? '');
+            throw $e;
+        }
+
+        return [
+            'publicIp' => $newEip['ipAddress'] ?? '',
+            'publicIpMode' => 'eip',
+            'eipAllocationId' => $newEip['allocationId'] ?? '',
+            'eipAddress' => $newEip['ipAddress'] ?? '',
+            'eipManaged' => true,
+            'internetMaxBandwidthOut' => $bandwidth
+        ];
+    }
+
     private function waitInstanceReady($key, $secret, $regionId, $instanceId)
     {
         $last = null;
@@ -1295,8 +1585,10 @@ class AliyunService
                 'instanceName' => $instance['InstanceName'] ?? '',
                 'status' => $instance['Status'] ?? 'Unknown',
                 'instanceType' => $instance['InstanceType'] ?? '',
-                'internetMaxBandwidthOut' => (int) ($instance['InternetMaxBandwidthOut'] ?? 0),
+                'internetMaxBandwidthOut' => (int) (($instance['EipAddress']['Bandwidth'] ?? 0) ?: ($instance['InternetMaxBandwidthOut'] ?? 0)),
                 'publicIp' => $instance['PublicIpAddress']['IpAddress'][0] ?? $instance['EipAddress']['IpAddress'] ?? '',
+                'eipAllocationId' => $instance['EipAddress']['AllocationId'] ?? '',
+                'eipAddress' => $instance['EipAddress']['IpAddress'] ?? '',
                 'privateIp' => $instance['VpcAttributes']['PrivateIpAddress']['IpAddress'][0] ?? ''
             ];
         }, $items);
@@ -1475,12 +1767,12 @@ class AliyunService
     {
         $raw = $zone['raw']['AvailableDiskCategories']['DiskCategories'] ?? $zone['raw']['AvailableDiskCategories']['DiskCategory'] ?? [];
         $categories = is_array($raw) ? $raw : [];
-        foreach (['cloud_essd', 'cloud_auto', 'cloud_efficiency', 'cloud'] as $preferred) {
+        foreach (['cloud_essd_entry', 'cloud_essd', 'cloud_auto', 'cloud_efficiency', 'cloud'] as $preferred) {
             if (empty($categories) || in_array($preferred, $categories, true)) {
                 return $preferred;
             }
         }
-        return 'cloud_essd';
+        return 'cloud_essd_entry';
     }
 
     private function estimateMaxBandwidthOut($instanceType, $regionId)

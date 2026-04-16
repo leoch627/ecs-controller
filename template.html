@@ -725,10 +725,14 @@
             display: flex;
             justify-content: center;
             gap: 8px;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
             width: 100%;
-            max-width: 260px;
+            max-width: none;
             margin: 0 auto;
+        }
+
+        .row-actions > button {
+            white-space: nowrap;
         }
 
         .account-modal-overlay {
@@ -1790,7 +1794,7 @@
                             <div>
                                 <p class="subtle-label">实例管理</p>
                                 <h2 class="section-title">实例管理</h2>
-                                <p class="mt-1 text-sm text-slate-500">管理所有账号组同步下来的实例，可按账号、区域、状态过滤并执行批量操作。</p>
+                                <p class="mt-1 text-sm text-slate-500">管理所有账号组同步下来的实例，可按账号、区域、状态过滤并执行单实例操作。</p>
                             </div>
                             <div class="manage-head-actions">
                                 <button @click="openCreateEcsModal" class="solid-button">
@@ -1831,24 +1835,13 @@
                             </div>
                         </div>
 
-                        <transition name="batch-bar">
-                        <div v-if="selectedInstanceIds.length > 0" class="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-3.5">
-                            <span class="chip">已选择 {{ selectedInstanceIds.length }} 台实例</span>
-                            <button @click="batchAction('start')" class="success-button">批量启动</button>
-                            <button @click="batchAction('stop')" class="warning-button">批量停止</button>
-                            <button @click="batchAction('delete')" class="danger-button">批量释放</button>
-                            <button @click="selectedInstanceIds = []" class="ghost-button">取消选择</button>
-                        </div>
-                        </transition>
-
                         <div class="table-shell desktop-visible" style="margin-top: 24px;">
                             <div class="bg-white/65 px-5 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[#7c8698]">
                                 列表模式
                             </div>
                             <div class="overflow-x-auto">
-                                <div class="min-w-[1024px]">
-                                    <div class="account-row summary-table-head" style="grid-template-columns: 40px minmax(260px,2fr) 100px 80px minmax(120px,0.9fr) minmax(100px,0.7fr) minmax(140px,1fr) 140px;">
-                                    <div></div>
+                                <div class="min-w-[980px]">
+                                    <div class="account-row summary-table-head" style="grid-template-columns: minmax(160px,1.25fr) 82px 70px minmax(120px,0.85fr) minmax(135px,0.95fr) minmax(115px,0.8fr) minmax(220px,1fr);">
                                     <div>账号 / 实例</div>
                                     <div>区域</div>
                                     <div>状态</div>
@@ -1860,10 +1853,7 @@
 
                                 <div v-for="inst in filteredManagedInstances" :key="'manage-row-' + inst.id"
                                     class="account-row"
-                                    style="grid-template-columns: 40px minmax(260px,2fr) 100px 80px minmax(120px,0.9fr) minmax(100px,0.7fr) minmax(140px,1fr) 140px;">
-                                    <div class="flex items-center">
-                                        <input v-model="selectedInstanceIds" type="checkbox" class="rounded" :value="inst.id">
-                                    </div>
+                                    style="grid-template-columns: minmax(160px,1.25fr) 82px 70px minmax(120px,0.85fr) minmax(135px,0.95fr) minmax(115px,0.8fr) minmax(220px,1fr);">
                                     <div class="summary-cell">
                                         <div class="summary-primary truncate" :title="inst.accountLabel || inst.remark || inst.instanceName">{{ inst.accountLabel || inst.remark || inst.instanceName }}</div>
                                         <div class="summary-secondary font-mono truncate" :title="inst.instanceId">{{ inst.instanceId }}</div>
@@ -1880,6 +1870,7 @@
                                     </div>
                                     <div class="summary-cell">
                                         <div class="summary-primary font-mono text-sm">{{ inst.publicIp || inst.privateIp || '-' }}</div>
+                                        <div class="summary-secondary">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</div>
                                     </div>
                                     <div class="summary-cell center-column">
                                         <div class="account-usage">
@@ -1896,6 +1887,7 @@
                                         <div class="row-actions">
                                             <button v-if="inst.instanceStatus === 'Stopped' || inst.instanceStatus === 'Unknown'" @click="controlInstance(inst.id, 'start')" class="success-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">启动</button>
                                             <button v-if="inst.instanceStatus === 'Running'" @click="controlInstance(inst.id, 'stop')" class="warning-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">停止</button>
+                                            <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">更换 IP</button>
                                             <button @click="deleteInstance(inst.id)" class="danger-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">释放</button>
                                         </div>
                                     </div>
@@ -1915,18 +1907,18 @@
                                         <p class="text-base font-bold">{{ inst.remark || inst.instanceName || inst.instanceId }}</p>
                                         <p class="mt-1 font-mono text-xs text-[#7c8698]">{{ inst.instanceId }}</p>
                                     </div>
-                                    <input v-model="selectedInstanceIds" type="checkbox" class="rounded" :value="inst.id">
                                 </div>
                                 <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
                                     <div><span class="text-[#7c8698]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
                                     <div><span class="text-[#7c8698]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
                                     <div><span class="text-[#7c8698]">状态</span><p class="mt-1"><span class="status-pill" :class="statusClass(inst.instanceStatus)">{{ statusText(inst.instanceStatus) }}</span></p></div>
-                                    <div><span class="text-[#7c8698]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p></div>
+                                    <div><span class="text-[#7c8698]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[#7c8698]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
                                     <div><span class="text-[#7c8698]">公网带宽峰值</span><p class="mt-1">{{ inst.internetMaxBandwidthOut ? inst.internetMaxBandwidthOut + ' Mbps' : '-' }}</p></div>
                                 </div>
                                 <div class="mt-4 flex gap-2">
                                     <button v-if="inst.instanceStatus === 'Stopped' || inst.instanceStatus === 'Unknown'" @click="controlInstance(inst.id, 'start')" class="success-button flex-1" :disabled="isRefreshingInstance(inst.id)">启动</button>
                                     <button v-if="inst.instanceStatus === 'Running'" @click="controlInstance(inst.id, 'stop')" class="warning-button flex-1" :disabled="isRefreshingInstance(inst.id)">停止</button>
+                                    <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button flex-1" :disabled="isRefreshingInstance(inst.id)">更换 IP</button>
                                     <button @click="deleteInstance(inst.id)" class="danger-button flex-1" :disabled="isRefreshingInstance(inst.id)">释放</button>
                                 </div>
                             </article>
@@ -2489,6 +2481,18 @@
                             :options="ecsOsOptions"
                         />
                     </div>
+                    <div>
+                        <label class="field-label">公网 IP 类型</label>
+                        <app-select
+                            v-model="ecsCreateDraft.publicIpMode"
+                            class="glass-select"
+                            :options="[
+                                { value: 'ecs_public_ip', label: 'ECS 普通公网 IP' },
+                                { value: 'eip', label: 'EIP 弹性公网 IP' }
+                            ]"
+                        />
+                        <p class="mt-2 text-xs text-slate-500">EIP 支持后续一键更换 IP；停机不释放，释放 ECS 时自动释放系统创建的 EIP。</p>
+                    </div>
                     <div class="modal-field-full">
                         <label class="field-label">系统盘大小（GB）</label>
                         <input v-model.number="ecsCreateDraft.systemDiskSize" type="number" min="1" class="glass-input" placeholder="20">
@@ -2520,6 +2524,7 @@
                         <div class="summary-list">
                             <div><span>实例计费</span><strong>按量付费</strong></div>
                             <div><span>公网计费</span><strong>按使用流量计费</strong></div>
+                            <div><span>公网 IP 类型</span><strong>{{ ecsCreatePreview.summary.publicIpModeLabel }}</strong></div>
                             <div><span>流量抵扣服务</span><strong>兼容方式创建</strong></div>
 	                            <div><span>公网带宽峰值</span><strong>{{ ecsCreatePreview.summary.internetMaxBandwidthOut }} Mbps起自动降级</strong></div>
 	                            <div><span>系统盘</span><strong>{{ ecsCreatePreview.summary.systemDisk.size }} GB / {{ diskCategoryText(ecsCreatePreview.summary.systemDisk.category) }}</strong></div>
@@ -2878,10 +2883,10 @@
                 });
 
                 const ecsOsOptions = [
+                    { value: 'debian_12', label: 'Debian 12' },
+                    { value: 'alibaba_cloud_linux_3', label: 'Alibaba Cloud Linux 3' },
                     { value: 'ubuntu_22', label: 'Ubuntu 22.04' },
                     { value: 'ubuntu_24', label: 'Ubuntu 24.04' },
-                    { value: 'alibaba_cloud_linux_3', label: 'Alibaba Cloud Linux 3' },
-                    { value: 'debian_12', label: 'Debian 12' },
                     { value: 'centos_stream_9', label: 'CentOS Stream 9' },
                     { value: 'windows_2022', label: 'Windows Server 2022' }
                 ];
@@ -2892,6 +2897,7 @@
                     instanceType: 'ecs.e-c4m1.large',
                     osKey: 'debian_12',
                     systemDiskSize: 20,
+                    publicIpMode: 'ecs_public_ip',
                     instanceName: `launch-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 12)}`
                 });
 
@@ -2899,7 +2905,6 @@
                 const statusInstances = ref([]);
                 const allInstances = ref([]);
                 const systemLogs = ref([]);
-                const selectedInstanceIds = ref([]);
                 const initialized = ref(true);
                 const loadingCheckInit = ref(true);
                 const loading = ref(true);
@@ -2988,6 +2993,7 @@
                 };
                 const diskCategoryText = (category) => ({
                     cloud_auto: '自动选择',
+                    cloud_essd_entry: 'ESSD Entry 云盘',
                     cloud_essd: '增强型固态盘',
                     cloud_efficiency: '高效云盘',
                     cloud: '普通云盘'
@@ -3168,11 +3174,6 @@
                             item.accountLabel
                         ].some((field) => (field || '').toLowerCase().includes(search));
                     });
-                });
-
-                const isAllSelected = computed(() => {
-                    if (filteredManagedInstances.value.length === 0) return false;
-                    return filteredManagedInstances.value.every((item) => selectedInstanceIds.value.includes(item.id));
                 });
 
                 const menuItems = computed(() => {
@@ -3487,12 +3488,15 @@
                     if (options.remove) {
                         allInstances.value = allInstances.value.filter((item) => Number(item.id) !== id && Number(item.accountId) !== id);
                         statusInstances.value = statusInstances.value.filter((item) => Number(item.id) !== id && Number(item.accountId) !== id);
-                        selectedInstanceIds.value = selectedInstanceIds.value.filter((itemId) => Number(itemId) !== id);
                         return;
                     }
 
                     allInstances.value = allInstances.value.map(patchItem);
                     statusInstances.value = statusInstances.value.map(patchItem);
+                };
+
+                const canReplaceIp = (inst) => {
+                    return isAdmin.value && inst && inst.publicIpMode === 'eip' && !!inst.eipManaged;
                 };
 
                 const controlInstance = async (accountId, action) => {
@@ -3522,6 +3526,45 @@
                         openAlert('操作请求失败', 'error');
                         fetchAllInstances(false);
                         fetchStatusData(false);
+                    } finally {
+                        refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(accountId));
+                    }
+                };
+
+                const replaceInstanceIp = async (accountId) => {
+                    const confirmed = await askConfirm('确定更换这台实例的公网 IP 吗？旧 EIP 会被释放且不可恢复，DDNS 会自动同步到新 IP。', {
+                        title: '更换公网 IP',
+                        confirmLabel: '确认更换'
+                    });
+                    if (!confirmed) return;
+
+                    refreshingInstanceIds.value = [...new Set([...refreshingInstanceIds.value, accountId])];
+                    try {
+                        const res = await fetch('index.php?action=replace_instance_ip', {
+                            method: 'POST',
+                            body: JSON.stringify({ accountId })
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.success) {
+                            openAlert(data.message || '公网 IP 更换失败', 'error');
+                            return;
+                        }
+
+                        const next = data.data || {};
+                        patchInstanceLists(accountId, {
+                            publicIp: next.publicIp || '',
+                            publicIpMode: 'eip',
+                            eipAllocationId: next.eipAllocationId || '',
+                            eipAddress: next.eipAddress || next.publicIp || '',
+                            eipManaged: true,
+                            internetMaxBandwidthOut: next.internetMaxBandwidthOut || 0
+                        });
+                        openAlert(`公网 IP 已更换为 ${next.publicIp || '-'}`, 'success');
+                        fetchAllInstances(false);
+                        fetchStatusData(false);
+                    } catch (error) {
+                        console.error('Replace instance IP failed', error);
+                        openAlert('公网 IP 更换请求失败', 'error');
                     } finally {
                         refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(accountId));
                     }
@@ -3558,55 +3601,6 @@
                     } finally {
                         refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(accountId));
                     }
-                };
-
-                const batchAction = async (action) => {
-                    if (selectedInstanceIds.value.length === 0) return;
-                    const actionLabel = action === 'delete' ? '释放' : (action === 'start' ? '启动' : '停止');
-                    const confirmed = await askConfirm(`确定批量${actionLabel}选中的 ${selectedInstanceIds.value.length} 台实例吗？`, {
-                        title: `批量${actionLabel}`
-                    });
-                    if (!confirmed) return;
-                    const pendingIds = [...selectedInstanceIds.value];
-                    const nextStatus = action === 'delete' ? 'Released' : (action === 'start' ? 'Starting' : 'Stopping');
-                    pendingIds.forEach((accountId) => {
-                        patchInstanceLists(accountId, { instanceStatus: nextStatus, status: nextStatus }, { remove: action === 'delete' });
-                    });
-                    refreshingInstanceIds.value = [...new Set([...refreshingInstanceIds.value, ...pendingIds])];
-
-                    try {
-                        for (const accountId of pendingIds) {
-                            const endpoint = action === 'delete' ? 'delete_instance' : 'control_instance';
-                            const body = action === 'delete'
-                                ? { accountId, forceStop: true }
-                                : { accountId, action, shutdownMode: config.value.shutdown_mode || 'KeepCharging' };
-
-                            await fetch(`index.php?action=${endpoint}`, {
-                                method: 'POST',
-                                body: JSON.stringify(body)
-                            });
-                        }
-
-                        selectedInstanceIds.value = [];
-                        openAlert(`批量${actionLabel}指令已提交`, 'success');
-                        fetchAllInstances(false);
-                        fetchStatusData(false);
-                    } catch (error) {
-                        console.error('Batch action failed', error);
-                        openAlert('批量操作失败', 'error');
-                        fetchAllInstances(false);
-                        fetchStatusData(false);
-                    } finally {
-                        refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => !pendingIds.map(Number).includes(Number(itemId)));
-                    }
-                };
-
-                const toggleSelectAll = () => {
-                    if (isAllSelected.value) {
-                        selectedInstanceIds.value = [];
-                        return;
-                    }
-                    selectedInstanceIds.value = filteredManagedInstances.value.map((item) => item.id);
                 };
 
                 const syncAccount = async (index) => {
@@ -3937,7 +3931,6 @@
                     currentMenu.value = 'status';
                     config.value = createDefaultConfig();
                     allInstances.value = [];
-                    selectedInstanceIds.value = [];
                     stopLogPolling();
                 };
 
@@ -4100,7 +4093,6 @@
                     filteredStatusInstances,
                     initialized,
                     isAdmin,
-                    isAllSelected,
                     loading,
                     loadingCheckInit,
                     logAutoRefresh,
@@ -4122,7 +4114,6 @@
                     ecsPreviewing,
                     selectedCreateAccountRegionName,
                     showCreateEcsModal,
-                    selectedInstanceIds,
                     sendingEmail,
                     setupData,
                     showAccountModal,
@@ -4156,6 +4147,7 @@
                     resetCreateEcsPreview,
                     previewCreateEcs,
                     confirmCreateEcs,
+                    canReplaceIp,
                     saveAccountModal,
                     statusClass,
                     statusText,
@@ -4171,9 +4163,8 @@
                     syncCloudInstances,
                     refreshInstanceCard,
                     controlInstance,
+                    replaceInstanceIp,
                     deleteInstance,
-                    batchAction,
-                    toggleSelectAll,
                     removeAccountRow,
                     saveConfig,
                     sendTestEmail,

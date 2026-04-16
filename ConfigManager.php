@@ -133,6 +133,16 @@ class ConfigManager
         return null;
     }
 
+    public function getAccountByInstanceId($instanceId)
+    {
+        foreach ($this->accountsCache as $acc) {
+            if (($acc['instance_id'] ?? '') === $instanceId) {
+                return $acc;
+            }
+        }
+        return null;
+    }
+
     public function decryptAccountSecret($secretFromDb)
     {
         if (empty($secretFromDb)) {
@@ -337,12 +347,16 @@ class ConfigManager
                 instance_type,
                 internet_max_bandwidth_out,
                 public_ip,
+                public_ip_mode,
+                eip_allocation_id,
+                eip_address,
+                eip_managed,
                 private_ip,
                 cpu,
                 memory,
                 os_name,
                 stopped_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
         $updateStmt = $this->db->prepare("
@@ -363,6 +377,10 @@ class ConfigManager
                 instance_type = ?,
                 internet_max_bandwidth_out = ?,
                 public_ip = ?,
+                public_ip_mode = ?,
+                eip_allocation_id = ?,
+                eip_address = ?,
+                eip_managed = ?,
                 private_ip = ?,
                 cpu = ?,
                 memory = ?,
@@ -391,6 +409,7 @@ class ConfigManager
                 $compositeKey = $group['groupKey'] . '|' . $instance['instanceId'];
                 $existingRow = $existingByComposite[$compositeKey] ?? null;
                 $remark = $this->resolveRemark($group, $instance, $existingRow);
+                $networkMeta = $this->resolveNetworkMetadata($instance, $existingRow);
 
                 if ($existingRow) {
                     $updateStmt->execute([
@@ -410,6 +429,10 @@ class ConfigManager
                         $instance['instanceType'] ?? '',
                         (int) ($instance['internetMaxBandwidthOut'] ?? 0),
                         $instance['publicIp'] ?? '',
+                        $networkMeta['public_ip_mode'],
+                        $networkMeta['eip_allocation_id'],
+                        $networkMeta['eip_address'],
+                        $networkMeta['eip_managed'],
                         $instance['privateIp'] ?? '',
                         (int) ($instance['cpu'] ?? 0),
                         (int) ($instance['memory'] ?? 0),
@@ -436,6 +459,10 @@ class ConfigManager
                         $instance['instanceType'] ?? '',
                         (int) ($instance['internetMaxBandwidthOut'] ?? 0),
                         $instance['publicIp'] ?? '',
+                        $networkMeta['public_ip_mode'],
+                        $networkMeta['eip_allocation_id'],
+                        $networkMeta['eip_address'],
+                        $networkMeta['eip_managed'],
                         $instance['privateIp'] ?? '',
                         (int) ($instance['cpu'] ?? 0),
                         (int) ($instance['memory'] ?? 0),
@@ -674,6 +701,51 @@ class ConfigManager
         }
 
         return $instance['instanceId'] ?? '';
+    }
+
+    private function resolveNetworkMetadata($instance, $existingRow = null)
+    {
+        $eipAllocationId = trim((string) ($instance['eipAllocationId'] ?? ''));
+        $eipAddress = trim((string) ($instance['eipAddress'] ?? ''));
+        $existingMode = trim((string) ($existingRow['public_ip_mode'] ?? ''));
+        $existingManaged = (int) ($existingRow['eip_managed'] ?? 0);
+
+        $mode = $eipAllocationId !== '' ? 'eip' : 'ecs_public_ip';
+        if ($existingMode === 'eip' && $eipAllocationId !== '') {
+            $mode = 'eip';
+        }
+
+        return [
+            'public_ip_mode' => $mode,
+            'eip_allocation_id' => $eipAllocationId !== '' ? $eipAllocationId : trim((string) ($existingRow['eip_allocation_id'] ?? '')),
+            'eip_address' => $eipAddress !== '' ? $eipAddress : ($mode === 'eip' ? trim((string) ($instance['publicIp'] ?? '')) : ''),
+            'eip_managed' => $existingManaged
+        ];
+    }
+
+    public function updateAccountNetworkMetadata($id, array $metadata)
+    {
+        $stmt = $this->db->prepare("
+            UPDATE accounts
+            SET public_ip = ?,
+                public_ip_mode = ?,
+                eip_allocation_id = ?,
+                eip_address = ?,
+                eip_managed = ?,
+                internet_max_bandwidth_out = ?
+            WHERE id = ?
+        ");
+
+        $stmt->execute([
+            $metadata['public_ip'] ?? '',
+            $metadata['public_ip_mode'] ?? 'ecs_public_ip',
+            $metadata['eip_allocation_id'] ?? '',
+            $metadata['eip_address'] ?? '',
+            !empty($metadata['eip_managed']) ? 1 : 0,
+            (int) ($metadata['internet_max_bandwidth_out'] ?? 0),
+            $id
+        ]);
+        $this->load();
     }
 
     private function updateGroupBaseSettings($groupKey, $group)

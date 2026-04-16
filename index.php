@@ -319,4 +319,13 @@ if ($action === 'delete_instance') {
     exit;
 }
 
+if ($action === 'replace_instance_ip') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $accountId = $data['accountId'] ?? 0;
+
+    $result = $app->replaceInstanceIpAction($accountId);
+    echo json_encode($result);
+    exit;
+}
+
 echo $app->renderTemplate();

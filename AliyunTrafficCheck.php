@@ -848,6 +848,10 @@ class AliyunTrafficCheck
                 'system_disk_size' => $result['systemDiskSize'] ?? 0,
                 'instance_id' => $result['instanceId'] ?? '',
                 'public_ip' => $result['publicIp'] ?? '',
+                'public_ip_mode' => $result['publicIpMode'] ?? 'ecs_public_ip',
+                'eip_allocation_id' => $result['eipAllocationId'] ?? '',
+                'eip_address' => $result['eipAddress'] ?? '',
+                'eip_managed' => !empty($result['eipManaged']) ? 1 : 0,
                 'login_user' => $result['loginUser'] ?? '',
                 'login_password' => '',
                 'status' => 'success',
@@ -856,6 +860,17 @@ class AliyunTrafficCheck
 
             $this->configManager->syncAccountGroups(true);
             $this->configManager->load();
+            $createdAccount = $this->configManager->getAccountByInstanceId($result['instanceId'] ?? '');
+            if ($createdAccount && (($result['publicIpMode'] ?? '') === 'eip')) {
+                $this->configManager->updateAccountNetworkMetadata($createdAccount['id'], [
+                    'public_ip' => $result['publicIp'] ?? '',
+                    'public_ip_mode' => 'eip',
+                    'eip_allocation_id' => $result['eipAllocationId'] ?? '',
+                    'eip_address' => $result['eipAddress'] ?? '',
+                    'eip_managed' => 1,
+                    'internet_max_bandwidth_out' => $result['internetMaxBandwidthOut'] ?? 0
+                ]);
+            }
             $this->syncDdnsForAccounts($this->configManager->getAccounts(), "ECS 创建后");
             $this->db->addLog('info', "一键创建 ECS成功 [{$this->getAccountLogLabel($account)}] {$result['instanceId']} {$preview['instanceType']} {$preview['regionId']} {$result['internetMaxBandwidthOut']}Mbps");
             $notifyResult = $this->notificationService->notifyEcsCreated($this->getAccountLogLabel($account), $result, $preview);
@@ -1428,6 +1443,62 @@ class AliyunTrafficCheck
         return true;
     }
 
+    public function replaceInstanceIpAction($accountId)
+    {
+        if ($this->initError) {
+            return ['success' => false, 'message' => $this->initError];
+        }
+
+        $targetAccount = $this->configManager->getAccountById($accountId);
+        if (!$targetAccount) {
+            return ['success' => false, 'message' => '实例不存在'];
+        }
+
+        if (($targetAccount['public_ip_mode'] ?? '') !== 'eip' || empty($targetAccount['eip_managed'])) {
+            return ['success' => false, 'message' => '当前实例不是系统托管 EIP，无法更换公网 IP'];
+        }
+
+        try {
+            $oldIp = $targetAccount['public_ip'] ?? '';
+            $result = $this->aliyunService->replaceManagedEip($targetAccount);
+            $this->configManager->updateAccountNetworkMetadata($accountId, [
+                'public_ip' => $result['publicIp'] ?? '',
+                'public_ip_mode' => 'eip',
+                'eip_allocation_id' => $result['eipAllocationId'] ?? '',
+                'eip_address' => $result['eipAddress'] ?? '',
+                'eip_managed' => 1,
+                'internet_max_bandwidth_out' => $result['internetMaxBandwidthOut'] ?? ($targetAccount['internet_max_bandwidth_out'] ?? 0)
+            ]);
+
+            $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'EIP 更换后');
+            $newIp = $result['publicIp'] ?? '';
+            $this->db->addLog('info', "EIP 已更换 [{$this->getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']} {$oldIp} -> {$newIp}");
+            $notifyResult = $this->notificationService->notifyPublicIpChanged(
+                $this->getAccountLogLabel($targetAccount),
+                $targetAccount,
+                $oldIp,
+                $newIp,
+                '用户在控制台手动更换公网 IP，DDNS 解析已同步更新。'
+            );
+            $this->logNotificationResult($notifyResult, $this->getAccountLogLabel($targetAccount));
+
+            return [
+                'success' => true,
+                'message' => '公网 IP 已更换',
+                'data' => [
+                    'publicIp' => $newIp,
+                    'publicIpMode' => 'eip',
+                    'eipAllocationId' => $result['eipAllocationId'] ?? '',
+                    'eipAddress' => $result['eipAddress'] ?? '',
+                    'internetMaxBandwidthOut' => $result['internetMaxBandwidthOut'] ?? 0
+                ]
+            ];
+        } catch (\Exception $e) {
+            $this->db->addLog('error', "EIP 更换失败 [{$this->getAccountLogLabel($targetAccount)}]: " . strip_tags($e->getMessage()));
+            return ['success' => false, 'message' => strip_tags($e->getMessage())];
+        }
+    }
+
     private function processPendingReleases()
     {
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
@@ -1446,6 +1517,27 @@ class AliyunTrafficCheck
 
             try {
                 if ($status === 'Stopped') {
+                    if (($account['public_ip_mode'] ?? '') === 'eip' && !empty($account['eip_managed'])) {
+                        try {
+                            if ($this->aliyunService->releaseManagedEip($account)) {
+                                $this->db->addLog('info', "托管 EIP 已随实例释放 [{$accountLabel}] {$account['eip_address']}");
+                                $this->configManager->updateAccountNetworkMetadata($account['id'], [
+                                    'public_ip' => '',
+                                    'public_ip_mode' => 'eip',
+                                    'eip_allocation_id' => '',
+                                    'eip_address' => '',
+                                    'eip_managed' => 0,
+                                    'internet_max_bandwidth_out' => $account['internet_max_bandwidth_out'] ?? 0
+                                ]);
+                                $account['eip_allocation_id'] = '';
+                                $account['eip_address'] = '';
+                                $account['eip_managed'] = 0;
+                            }
+                        } catch (\Exception $e) {
+                            $this->db->addLog('warning', "托管 EIP 释放失败，将于下一轮重试 [{$accountLabel}]: " . strip_tags($e->getMessage()));
+                            continue;
+                        }
+                    }
                     $result = $this->aliyunService->deleteInstance($account, false);
                     if ($result) {
                         $this->db->addLog('warning', "后台异步彻底销毁成功 [{$accountLabel}] {$account['instance_id']}");
@@ -1524,16 +1616,17 @@ class AliyunTrafficCheck
         $groupCounts = $this->getDdnsGroupCounts($accounts);
 
         foreach ($accounts as $account) {
-            if (empty($account['instance_id']) || empty($account['public_ip'])) {
+            $publicIp = $this->getEffectivePublicIp($account);
+            if (empty($account['instance_id']) || $publicIp === '') {
                 continue;
             }
 
             try {
                 $recordName = $this->buildDdnsRecordNameForAccount($account, $groupCounts);
 
-                $result = $this->ddnsService->syncARecord($recordName, $account['public_ip']);
+                $result = $this->ddnsService->syncARecord($recordName, $publicIp);
                 if (!empty($result['success']) && empty($result['skipped'])) {
-                    $this->db->addLog('info', "DDNS 已同步 [{$this->getAccountLogLabel($account)}] {$recordName} -> {$account['public_ip']} ({$source})");
+                    $this->db->addLog('info', "DDNS 已同步 [{$this->getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
                 } elseif (empty($result['success'])) {
                     $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
                 }
@@ -1541,6 +1634,18 @@ class AliyunTrafficCheck
                 $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
             }
         }
+    }
+
+    private function getEffectivePublicIp(array $account)
+    {
+        if (($account['public_ip_mode'] ?? '') === 'eip') {
+            $eip = trim((string) ($account['eip_address'] ?? ''));
+            if ($eip !== '') {
+                return $eip;
+            }
+        }
+
+        return trim((string) ($account['public_ip'] ?? ''));
     }
 
     private function reconcileDdnsAfterAccountSync(array $beforeAccounts, array $afterAccounts, $source = '同步')
@@ -1740,6 +1845,10 @@ class AliyunTrafficCheck
             'osName' => $account['os_name'] ?? '',
             'internetMaxBandwidthOut' => (int) ($account['internet_max_bandwidth_out'] ?? 0),
             'publicIp' => $includeSensitive ? ($account['public_ip'] ?? '') : '',
+            'publicIpMode' => $account['public_ip_mode'] ?? 'ecs_public_ip',
+            'eipAllocationId' => $includeSensitive ? ($account['eip_allocation_id'] ?? '') : '',
+            'eipAddress' => $includeSensitive ? ($account['eip_address'] ?? '') : '',
+            'eipManaged' => !empty($account['eip_managed']),
             'privateIp' => $includeSensitive ? ($account['private_ip'] ?? '') : '',
             'maxTraffic' => $maxTraffic,
             'siteType' => $account['site_type'] ?? 'international'

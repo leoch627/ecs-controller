@@ -171,6 +171,37 @@ class NotificationService
         return $this->dispatchNotifications($title, '实例已释放，本地记录和 DDNS 解析将同步清理。', $details, 'warning', $textMsg, $accountLabel);
     }
 
+    public function notifyPublicIpChanged($accountLabel, array $account, $oldIp, $newIp, $reason = '')
+    {
+        $instanceName = $account['instance_name'] ?? ($account['remark'] ?? '');
+        $instanceId = $account['instance_id'] ?? '';
+        $region = $account['region_id'] ?? '';
+        $title = '公网 IP 已更换';
+
+        $details = [
+            ['label' => '账号', 'value' => $accountLabel],
+            ['label' => '实例名称', 'value' => $instanceName ?: '-'],
+            ['label' => '实例编号', 'value' => $instanceId ?: '-', 'highlight' => true],
+            ['label' => '区域', 'value' => $region ?: '-'],
+            ['label' => '原公网 IP', 'value' => $oldIp ?: '-'],
+            ['label' => '新公网 IP', 'value' => $newIp ?: '-', 'highlight' => true],
+            ['label' => '变更时间', 'value' => date('Y-m-d H:i:s')],
+            ['label' => '说明', 'value' => $reason ?: '系统已更换托管 EIP，并同步更新 DDNS 解析。']
+        ];
+
+        $textMsg = "【ECS 服务器管家】公网 IP 已更换\n" .
+            "账号: {$accountLabel}\n" .
+            "实例名称: " . ($instanceName ?: '-') . "\n" .
+            "实例编号: " . ($instanceId ?: '-') . "\n" .
+            "区域: " . ($region ?: '-') . "\n" .
+            "原公网 IP: " . ($oldIp ?: '-') . "\n" .
+            "新公网 IP: " . ($newIp ?: '-') . "\n" .
+            "变更时间: " . date('Y-m-d H:i:s') . "\n" .
+            "说明: " . ($reason ?: '系统已更换托管 EIP，并同步更新 DDNS 解析。');
+
+        return $this->dispatchNotifications($title, '公网 IP 已成功更换，DDNS 解析已同步更新。', $details, 'success', $textMsg, $accountLabel);
+    }
+
     private function statusLabel($status)
     {
         $map = [
