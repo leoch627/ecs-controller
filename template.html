@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ECS 服务器管理</title>
     <meta name="description" content="阿里云 流量抵扣服务 流量监控控制台，支持实例状态查看、实例管理、账号管理、系统设置与日志审计。">
-    <link rel="icon" type="image/png" href="icon.png">
+    <link id="app-favicon" rel="icon" type="image/png" href="icon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -3166,6 +3166,16 @@
                     cloud: '普通云盘'
                 }[category] || category || '-');
                 const brandLogoUrl = computed(() => (config.value.AppBrand?.logo_url || '').trim());
+                const updateFavicon = (url) => {
+                    const icon = document.getElementById('app-favicon');
+                    if (!icon) return;
+                    const nextUrl = url || 'icon.png';
+                    const cleanUrl = nextUrl.split('?')[0].toLowerCase();
+                    const iconType = cleanUrl.endsWith('.webp') ? 'image/webp'
+                        : (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg') ? 'image/jpeg' : 'image/png');
+                    icon.setAttribute('href', nextUrl);
+                    icon.setAttribute('type', iconType);
+                };
                 const ecsDiskCategorySelectOptions = computed(() => {
                     if (ecsDiskLoading.value) {
                         return [{ value: ecsCreateDraft.value.systemDiskCategory || '', label: '正在获取硬盘类型...' }];
@@ -4405,6 +4415,10 @@
                         stopManagePolling();
                     }
                 });
+
+                watch(brandLogoUrl, (url) => {
+                    updateFavicon(url);
+                }, { immediate: true });
 
                 watch(() => ecsCreateDraft.value.accountGroupKey, () => {
                     if (selectedCreateAccount.value) {
