@@ -19,5 +19,11 @@ static/tailwindcss-browser.js
 
 # Local runtime data
 /data/
+data.reset-backup*/
+test_deploy/
 *.sqlite*
 monitor.db
+*.db
+*.bak
+*.bak.*
+.secret*

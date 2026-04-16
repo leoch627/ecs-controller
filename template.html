@@ -923,6 +923,60 @@
             margin-top: 16px;
         }
 
+        .setup-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background:
+                radial-gradient(circle at 18% 18%, rgba(79, 70, 229, 0.08), transparent 30%),
+                radial-gradient(circle at 82% 12%, rgba(16, 185, 129, 0.08), transparent 26%),
+                var(--canvas);
+        }
+
+        .setup-card {
+            width: min(520px, 100%);
+            border-radius: 22px;
+            padding: 28px;
+            animation: modal-rise .22s ease both;
+        }
+
+        .setup-title {
+            margin-top: 8px;
+            font-size: 1.75rem;
+            line-height: 1.2;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+        }
+
+        .setup-desc {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 0.875rem;
+            line-height: 1.7;
+        }
+
+        .setup-form {
+            display: grid;
+            gap: 14px;
+            margin-top: 22px;
+        }
+
+        .setup-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .setup-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
         .test-state {
             margin-top: 8px;
             font-size: 0.75rem;
@@ -1528,6 +1582,29 @@
 
             .two-col-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .setup-overlay {
+                align-items: flex-start;
+                padding: 18px;
+                padding-top: 12vh;
+            }
+
+            .setup-card {
+                border-radius: 20px;
+                padding: 22px;
+            }
+
+            .setup-title {
+                font-size: 1.45rem;
+            }
+
+            .setup-row {
+                grid-template-columns: 1fr;
+            }
+
+            .setup-actions .solid-button {
+                width: 100%;
             }
 
             .mobile-stack .row-actions {
@@ -2540,28 +2617,38 @@
             </div>
         </div>
 
-        <div v-if="!initialized && !loadingCheckInit && !criticalError" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div class="glass-panel w-full max-w-xl rounded-[38px] p-8">
+        <div v-if="!initialized && !loadingCheckInit && !criticalError" class="setup-overlay">
+            <div class="glass-panel setup-card">
                 <p class="subtle-label">初始化向导</p>
-                        <h2 class="mt-2 text-3xl font-black">初始化 ECS 服务器管理</h2>
-                        <p class="mt-2 text-sm text-[#6f7787]">首次使用时需要先设置管理员密码和流量保护阈值。</p>
+                <h2 class="setup-title">初始化 ECS 服务器管理</h2>
+                <p class="setup-desc">首次使用时设置管理员密码、流量保护阈值和默认停机方式，后续可在系统设置中调整。</p>
 
-                <div class="mt-6 grid gap-4">
-                    <input v-model="setupData.admin_password" class="glass-input" placeholder="管理员密码">
-                    <div class="grid gap-4 md:grid-cols-2">
-                        <input v-model.number="setupData.traffic_threshold" type="number" class="glass-input" placeholder="流量阈值">
-                        <app-select
-                            v-model="setupData.shutdown_mode"
-                            class="glass-select"
-                            :options="[
-                                { value: 'KeepCharging', label: '普通停机' },
-                                { value: 'StopCharging', label: '节省停机' }
-                            ]"
-                        />
+                <div class="setup-form">
+                    <div>
+                        <label class="field-label">管理员密码</label>
+                        <input v-model="setupData.admin_password" type="password" class="glass-input" placeholder="请输入管理员密码">
+                    </div>
+                    <div class="setup-row">
+                        <div>
+                            <label class="field-label">流量保护阈值（%）</label>
+                            <input v-model.number="setupData.traffic_threshold" type="number" class="glass-input" placeholder="例如：95">
+                        </div>
+                        <div>
+                            <label class="field-label">默认停机方式</label>
+                            <app-select
+                                v-model="setupData.shutdown_mode"
+                                class="glass-select"
+                                placeholder="请选择停机方式"
+                                :options="[
+                                    { value: 'KeepCharging', label: '普通停机' },
+                                    { value: 'StopCharging', label: '节省停机' }
+                                ]"
+                            />
+                        </div>
                     </div>
                 </div>
 
-                <div class="mt-6 flex justify-end">
+                <div class="setup-actions">
                     <button @click="performSetup" class="solid-button" :disabled="!setupData.admin_password">初始化系统</button>
                 </div>
             </div>
