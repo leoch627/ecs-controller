@@ -71,6 +71,12 @@ class DdnsService
         ];
 
         if ($existing) {
+            // 同 IP 且代理模式未变则跳过，避免每次巡检都无意义地调用 Cloudflare API
+            $sameIp = (($existing['content'] ?? '') === $ip);
+            $sameProxied = (($existing['proxied'] ?? false) === $payload['proxied']);
+            if ($sameIp && $sameProxied) {
+                return ['success' => true, 'skipped' => true, 'record' => $recordName, 'ip' => $ip, 'action' => 'unchanged'];
+            }
             $response = $this->request('PUT', '/dns_records/' . $existing['id'], $payload);
         } else {
             $response = $this->request('POST', '/dns_records', $payload);

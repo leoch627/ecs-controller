@@ -453,15 +453,16 @@ class AliyunTrafficCheck
         if ($this->initError)
             return "错误: " . $this->initError;
 
-        // 优化：分级清理日志
-        // 普通/重要日志保留 30 天，高频心跳日志仅保留 3 天
-        $this->db->pruneLogs(30, 3);
+        // 数据库维护仅在整点（每小时第 0 分钟）执行一次，避免每分钟跑 DELETE 开销。
+        if (date('i') === '00') {
+            // 普通/重要日志保留 30 天，高频心跳日志仅保留 3 天
+            $this->db->pruneLogs(30, 3);
+            $this->db->pruneStats();
 
-        $this->db->pruneStats();
-
-        // 优化：每天凌晨 04:xx 执行一次 VACUUM 整理数据库碎片
-        if (date('H') === '04' && date('i') === '00') {
-            $this->db->vacuum();
+            // 每天凌晨 04:00 执行一次 VACUUM 整理数据库碎片
+            if (date('H') === '04') {
+                $this->db->vacuum();
+            }
         }
 
         $logs = [];
