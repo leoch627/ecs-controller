@@ -454,7 +454,7 @@ class AliyunTrafficCheck
             return "错误: " . $this->initError;
 
         // 数据库维护仅在整点（每小时第 0 分钟）执行一次，避免每分钟跑 DELETE 开销。
-        if (date('i') === '00') {
+        if ((int) date('i') === 0) {
             // 普通/重要日志保留 30 天，高频心跳日志仅保留 3 天
             $this->db->pruneLogs(30, 3);
             $this->db->pruneStats();

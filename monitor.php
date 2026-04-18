@@ -17,8 +17,10 @@ if (!$_lockFp || !flock($_lockFp, LOCK_EX | LOCK_NB)) {
 }
 // 注册退出时自动释放锁（包括致命错误、exit、正常结束）
 register_shutdown_function(function () use ($_lockFp) {
-    flock($_lockFp, LOCK_UN);
-    fclose($_lockFp);
+    if (is_resource($_lockFp)) {
+        flock($_lockFp, LOCK_UN);
+        fclose($_lockFp);
+    }
 });
 
 header('Content-Type: text/plain; charset=utf-8');
