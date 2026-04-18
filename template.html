@@ -2416,7 +2416,7 @@
                             <div class="metric-card">
                                 <div>
                                     <p class="subtle-label">账号池轮换</p>
-                                    <h3 class="mt-1 text-lg font-bold">账号池轮换</h3>
+                                    <h3 class="mt-1 text-lg font-bold">自动切换配置</h3>
                                     <p class="mt-2 text-sm leading-6 text-[#6f7787]">
                                         启用后，当当前活跃账号流量超限时，系统会自动切换到账号列表中的下一个账号，并更新入口域名解析。账号顺序以账号管理中的排列为准。
                                     </p>
@@ -2465,7 +2465,8 @@
 
                             <div class="metric-card">
                                 <div class="tab-pill-group">
-                                    <button @click="currentNotifyTab = 'email'" class="ghost-button" :class="{ 'text-dark-button': currentNotifyTab === 'email' }">邮件</button>                                    <button @click="currentNotifyTab = 'telegram'" class="ghost-button" :class="{ 'text-dark-button': currentNotifyTab === 'telegram' }">Telegram</button>
+                                    <button @click="currentNotifyTab = 'email'" class="ghost-button" :class="{ 'text-dark-button': currentNotifyTab === 'email' }">邮件</button>
+                                    <button @click="currentNotifyTab = 'telegram'" class="ghost-button" :class="{ 'text-dark-button': currentNotifyTab === 'telegram' }">Telegram</button>
                                     <button @click="currentNotifyTab = 'webhook'" class="ghost-button" :class="{ 'text-dark-button': currentNotifyTab === 'webhook' }">接口回调</button>
                                 </div>
 
