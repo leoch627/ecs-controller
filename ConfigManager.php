@@ -164,6 +164,17 @@ class ConfigManager
         return $this->deriveAccountGroupsFromAccounts();
     }
 
+    public function getRotationConfig()
+    {
+        return [
+            'enabled' => ($this->configCache['rotation_enabled'] ?? '0') === '1',
+            'entry_subdomain' => trim((string) ($this->configCache['rotation_entry_subdomain'] ?? 'node')),
+            'cooldown' => max(60, (int) ($this->configCache['rotation_cooldown'] ?? 300)),
+            'active_group' => $this->configCache['rotation_active_group'] ?? '',
+            'last_switch' => (int) ($this->configCache['rotation_last_switch'] ?? 0),
+        ];
+    }
+
     public function getAccountGroupMetrics()
     {
         $groups = $this->getAccountGroups();
@@ -284,6 +295,7 @@ class ConfigManager
             $appBrand = is_array($data['AppBrand'] ?? null) ? $data['AppBrand'] : [];
             $this->saveSetting('app_logo_url', trim((string) ($appBrand['logo_url'] ?? '')));
             $this->saveDdnsSettings($data['Ddns'] ?? []);
+            $this->saveRotationSettings($data['Rotation'] ?? []);
 
             if (isset($data['Notification'])) {
                 $this->saveNotificationSettings($data['Notification']);
@@ -559,6 +571,15 @@ class ConfigManager
         }
 
         $this->saveSetting('ddns_cf_proxied', !empty($cloudflare['proxied']) ? '1' : '0');
+    }
+
+    private function saveRotationSettings($rotation)
+    {
+        $rotation = is_array($rotation) ? $rotation : [];
+        $this->saveSetting('rotation_enabled', !empty($rotation['enabled']) ? '1' : '0');
+        $this->saveSetting('rotation_entry_subdomain', trim((string) ($rotation['entry_subdomain'] ?? 'node')));
+        $this->saveSetting('rotation_cooldown', (string) max(60, (int) ($rotation['cooldown'] ?? 300)));
+        // rotation_active_group and rotation_last_switch are managed by the monitor, not by user config
     }
 
     private function normalizeAccountGroups(array $groups, $allowEmpty = false)
@@ -853,6 +874,12 @@ class ConfigManager
     {
         $stmt = $this->db->prepare("UPDATE accounts SET auto_start_blocked = ? WHERE id = ?");
         return $stmt->execute([$blocked ? 1 : 0, $id]);
+    }
+
+    public function updateRotationState($activeGroupKey, $switchTime)
+    {
+        $this->saveSetting('rotation_active_group', (string) $activeGroupKey);
+        $this->saveSetting('rotation_last_switch', (string) (int) $switchTime);
     }
 
     public function blockCurrentlyStoppedInstances()

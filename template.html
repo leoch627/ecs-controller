@@ -1731,6 +1731,69 @@
                 flex: 1 1 0;
             }
         }
+
+        .rotation-status-bar {
+            margin-top: 16px;
+            border-radius: 14px;
+            border: 1px solid #e0e7ef;
+            background: linear-gradient(90deg, #f0f4ff 0%, #f8fafc 100%);
+            padding: 10px 18px;
+        }
+
+        .rotation-status-bar__inner {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 0;
+        }
+
+        .rotation-status-bar__item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 12px;
+        }
+
+        .rotation-status-bar__item:first-child {
+            padding-left: 0;
+        }
+
+        .rotation-status-bar__label {
+            font-size: 0.72rem;
+            color: #7c8698;
+            white-space: nowrap;
+        }
+
+        .rotation-status-bar__value {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #1f2328;
+        }
+
+        .rotation-status-bar__meta {
+            font-size: 0.72rem;
+            color: #9ca3af;
+        }
+
+        .rotation-status-bar__badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 1px 8px;
+            border-radius: 99px;
+        }
+
+        .rotation-status-bar__badge.active {
+            background: #dcfce7;
+            color: #16a34a;
+            border: 1px solid #bbf7d0;
+        }
+
+        .rotation-status-bar__divider {
+            width: 1px;
+            height: 16px;
+            background: #d1d5db;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 
@@ -1826,6 +1889,32 @@
                                 <button @click="fetchStatusData" class="solid-button" :disabled="loading">
                                     {{ loading ? '刷新中...' : '刷新状态' }}
                                 </button>
+                            </div>
+                        </div>
+
+                        <!-- 账号池轮换状态栏 -->
+                        <div v-if="rotationStatus && rotationStatus.enabled" class="rotation-status-bar">
+                            <div class="rotation-status-bar__inner">
+                                <div class="rotation-status-bar__item">
+                                    <span class="rotation-status-bar__label">账号池模式</span>
+                                    <span class="rotation-status-bar__badge active">已启用</span>
+                                </div>
+                                <div class="rotation-status-bar__divider"></div>
+                                <div class="rotation-status-bar__item">
+                                    <span class="rotation-status-bar__label">当前活跃账号</span>
+                                    <span class="rotation-status-bar__value">{{ rotationStatus.active_label || '未设置' }}</span>
+                                    <span class="rotation-status-bar__meta">(第 {{ rotationStatus.active_index + 1 }} / {{ rotationStatus.pool_size }} 个)</span>
+                                </div>
+                                <div class="rotation-status-bar__divider"></div>
+                                <div class="rotation-status-bar__item">
+                                    <span class="rotation-status-bar__label">入口域名</span>
+                                    <span class="rotation-status-bar__value font-mono">{{ rotationStatus.entry_domain || '未配置' }}</span>
+                                </div>
+                                <div v-if="rotationStatus.last_switch_str" class="rotation-status-bar__divider"></div>
+                                <div v-if="rotationStatus.last_switch_str" class="rotation-status-bar__item">
+                                    <span class="rotation-status-bar__label">上次切换</span>
+                                    <span class="rotation-status-bar__value">{{ rotationStatus.last_switch_str }}</span>
+                                </div>
                             </div>
                         </div>
 
@@ -2321,6 +2410,56 @@
                                     <p class="text-xs leading-6 text-[#7c8698]">
                                         必填：API Token 和根域名。Zone ID 可不填，系统会根据根域名自动查询。命名规则：单机器使用“账号备注.根域名”；同账号多机器使用“账号备注-实例备注或实例短 ID.根域名”。
                                     </p>
+                                </div>
+                            </div>
+
+                            <div class="metric-card">
+                                <div>
+                                    <p class="subtle-label">账号池轮换</p>
+                                    <h3 class="mt-1 text-lg font-bold">自动切换配置</h3>
+                                    <p class="mt-2 text-sm leading-6 text-[#6f7787]">
+                                        启用后，当当前活跃账号流量超限时，系统会自动切换到账号列表中的下一个账号，并更新入口域名解析。账号顺序以账号管理中的排列为准。
+                                    </p>
+                                </div>
+                                <div class="mt-5 space-y-3">
+                                    <label class="switch-row flex items-center justify-between gap-4 rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
+                                        <span>
+                                            <span class="block font-semibold text-[#1f2328]">启用账号池轮换</span>
+                                            <span class="mt-1 block text-xs leading-5 text-[#6f7787]">超限后自动停止旧账号实例、启动新账号实例并同步 DDNS 入口记录。</span>
+                                        </span>
+                                        <span class="switch-control shrink-0">
+                                            <input type="checkbox" v-model="config.Rotation.enabled">
+                                            <span class="switch-slider"></span>
+                                        </span>
+                                    </label>
+                                    <div v-if="config.Rotation.enabled" class="space-y-3">
+                                        <div class="two-col-grid">
+                                            <div>
+                                                <label class="mb-2 block text-sm font-semibold text-[#6f7787]">入口子域名</label>
+                                                <input v-model="config.Rotation.entry_subdomain" class="glass-input" placeholder="例如 node">
+                                                <p class="mt-1 text-xs text-[#7c8698]">入口域名将为：{{ config.Rotation.entry_subdomain && config.Ddns.domain ? config.Rotation.entry_subdomain + '.' + config.Ddns.domain : '（请填写子域名和 DDNS 根域名）' }}</p>
+                                            </div>
+                                            <div>
+                                                <label class="mb-2 block text-sm font-semibold text-[#6f7787]">切换冷却时间（秒）</label>
+                                                <input v-model.number="config.Rotation.cooldown" type="number" class="glass-input" min="60" placeholder="300">
+                                                <p class="mt-1 text-xs text-[#7c8698]">两次切换之间的最短间隔，最少 60 秒。</p>
+                                            </div>
+                                        </div>
+                                        <div v-if="config.Rotation.active_group || config.Rotation.last_switch_str" class="rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm space-y-1">
+                                            <div class="font-semibold text-[#1f2328] mb-2">当前状态（只读）</div>
+                                            <div v-if="config.Rotation.active_group" class="flex justify-between text-xs text-[#6f7787]">
+                                                <span>活跃账号 GroupKey</span>
+                                                <span class="font-mono">{{ config.Rotation.active_group }}</span>
+                                            </div>
+                                            <div v-if="config.Rotation.last_switch_str" class="flex justify-between text-xs text-[#6f7787]">
+                                                <span>上次切换时间</span>
+                                                <span>{{ config.Rotation.last_switch_str }}</span>
+                                            </div>
+                                        </div>
+                                        <p class="text-xs leading-6 text-[#7c8698]">
+                                            账号池顺序：系统将按"账号管理"中的顺序依次轮换。请确保每个账号下已通过"实例管理"创建并同步了实例。轮换时，已超限账号的实例会被停机，新账号的实例会被启动，同时更新入口域名解析。
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -3040,7 +3179,15 @@
                             body: ''
                         }
                     },
-                    Accounts: []
+                    Accounts: [],
+                    Rotation: {
+                        enabled: false,
+                        entry_subdomain: 'node',
+                        cooldown: 300,
+                        active_group: '',
+                        last_switch: 0,
+                        last_switch_str: ''
+                    }
                 });
 
                 const ecsOsOptions = [
@@ -3127,6 +3274,7 @@
 
                 const statusFilter = ref({ account: '', search: '' });
                 const manageFilter = ref({ account: '', region: '', status: '', search: '' });
+                const rotationStatus = ref(null);
                 let logInterval = null;
                 let statusInterval = null;
                 let manageInterval = null;
@@ -3421,6 +3569,11 @@
                         ...item
                     })) : [];
 
+                    next.Rotation = {
+                        ...next.Rotation,
+                        ...(payload?.Rotation || {})
+                    };
+
                     return next;
                 };
 
@@ -3437,7 +3590,12 @@
                         enable_billing: !!source.enable_billing,
                         AppBrand: source.AppBrand || {},
                         Ddns: source.Ddns || {},
-                        Notification: source.Notification || {}
+                        Notification: source.Notification || {},
+                        Rotation: {
+                            enabled: !!source.Rotation?.enabled,
+                            entry_subdomain: source.Rotation?.entry_subdomain || 'node',
+                            cooldown: Number(source.Rotation?.cooldown || 300)
+                        }
                     });
                 };
 
@@ -3472,6 +3630,7 @@
                             statusInstances.value = [];
                         } else {
                             statusInstances.value = json.data || [];
+                            rotationStatus.value = json.rotation || null;
                             statusSyncInterval.value = Number(json.sync_interval || statusSyncInterval.value || 600);
                             const now = Math.floor(Date.now() / 1000);
                             cronWarning.value = json.system_last_run ? (now - json.system_last_run) > 180 : statusInstances.value.length > 0;
@@ -4567,7 +4726,8 @@
                     sendTestTelegram,
                     sendTestWebhook,
                     fetchLogs,
-                    clearLogs
+                    clearLogs,
+                    rotationStatus
                 };
             }
         }).mount('#app');

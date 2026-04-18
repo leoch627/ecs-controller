@@ -304,6 +304,16 @@ class AliyunTrafficCheck
             'Accounts' => []
         ];
 
+        $rotationSettings = $this->configManager->getRotationConfig();
+        $config['Rotation'] = [
+            'enabled' => $rotationSettings['enabled'],
+            'entry_subdomain' => $rotationSettings['entry_subdomain'],
+            'cooldown' => $rotationSettings['cooldown'],
+            'active_group' => $rotationSettings['active_group'],
+            'last_switch' => $rotationSettings['last_switch'],
+            'last_switch_str' => $rotationSettings['last_switch'] > 0 ? date('Y-m-d H:i:s', $rotationSettings['last_switch']) : '',
+        ];
+
         foreach ($accountGroups as $row) {
             $metrics = $groupMetrics[$row['groupKey']] ?? [
                 'usageUsed' => 0,
@@ -618,6 +628,13 @@ class AliyunTrafficCheck
         // 执行异步彻底销毁循环
         $this->processPendingReleases();
 
+        // 账号池轮换检查
+        $rotationConfig = $this->configManager->getRotationConfig();
+        if ($rotationConfig['enabled']) {
+            $this->configManager->load();
+            $this->tryPoolRotation($threshold, $shutdownMode);
+        }
+
         return implode(PHP_EOL, $logs);
     }
 
@@ -654,7 +671,8 @@ class AliyunTrafficCheck
             'data' => $data,
             'system_last_run' => $this->configManager->getLastRunTime(),
             'sync_interval' => $userInterval,
-            'sensitive_visible' => $includeSensitive
+            'sensitive_visible' => $includeSensitive,
+            'rotation' => $this->buildRotationStatus()
         ];
     }
 
@@ -1957,5 +1975,258 @@ class AliyunTrafficCheck
         ob_start();
         include 'template.html';
         return ob_get_clean();
+    }
+
+    // ==================== 账号池轮换 ====================
+
+    private function buildRotationStatus()
+    {
+        $rotationConfig = $this->configManager->getRotationConfig();
+        if (!$rotationConfig['enabled']) {
+            return null;
+        }
+
+        $groups = $this->configManager->getAccountGroups();
+        $activeGroupKey = $rotationConfig['active_group'];
+        if ($activeGroupKey === '' && !empty($groups)) {
+            $activeGroupKey = $groups[0]['groupKey'];
+        }
+
+        $activeLabel = '';
+        $activeIndex = 0;
+        foreach ($groups as $i => $group) {
+            if ($group['groupKey'] === $activeGroupKey) {
+                $activeLabel = $group['remark'] ?: (substr($group['AccessKeyId'], 0, 7) . '***');
+                $activeIndex = $i;
+                break;
+            }
+        }
+
+        $ddnsDomain = trim((string) ($this->configManager->get('ddns_domain', '')));
+        $entrySubdomain = $rotationConfig['entry_subdomain'];
+        $entryDomain = ($entrySubdomain !== '' && $ddnsDomain !== '') ? ($entrySubdomain . '.' . $ddnsDomain) : '';
+
+        $pool = [];
+        foreach ($groups as $i => $group) {
+            $pool[] = [
+                'groupKey' => $group['groupKey'],
+                'label' => $group['remark'] ?: (substr($group['AccessKeyId'], 0, 7) . '***'),
+                'active' => $group['groupKey'] === $activeGroupKey,
+                'index' => $i,
+            ];
+        }
+
+        return [
+            'enabled' => true,
+            'active_group' => $activeGroupKey,
+            'active_label' => $activeLabel,
+            'active_index' => $activeIndex,
+            'pool_size' => count($groups),
+            'pool' => $pool,
+            'last_switch' => $rotationConfig['last_switch'],
+            'last_switch_str' => $rotationConfig['last_switch'] > 0 ? date('Y-m-d H:i:s', $rotationConfig['last_switch']) : '',
+            'entry_domain' => $entryDomain,
+            'cooldown' => $rotationConfig['cooldown'],
+        ];
+    }
+
+    private function tryPoolRotation($threshold, $shutdownMode)
+    {
+        $rotationConfig = $this->configManager->getRotationConfig();
+        $currentTime = time();
+        $cooldown = $rotationConfig['cooldown'];
+        $lastSwitch = $rotationConfig['last_switch'];
+
+        $groups = $this->configManager->getAccountGroups();
+        if (empty($groups)) {
+            return;
+        }
+
+        $activeGroupKey = $rotationConfig['active_group'];
+        if ($activeGroupKey === '') {
+            $activeGroupKey = $groups[0]['groupKey'];
+            $this->configManager->updateRotationState($activeGroupKey, 0);
+        }
+
+        $accounts = $this->configManager->getAccounts();
+
+        // Sync entry DDNS to active account (best-effort, runs every cycle)
+        $this->syncRotationEntryDns($accounts, $activeGroupKey, $rotationConfig['entry_subdomain']);
+
+        // Check if active group is over threshold
+        $activeGroupOverThreshold = false;
+        $activeGroupLabel = '';
+        foreach ($accounts as $account) {
+            if (($account['group_key'] ?? '') !== $activeGroupKey) {
+                continue;
+            }
+            if ($activeGroupLabel === '') {
+                $activeGroupLabel = $this->getAccountLogLabel($account);
+            }
+            $maxTraffic = (float) ($account['max_traffic'] ?? 0);
+            $accountTraffic = $this->getGroupTrafficUsed($account);
+            $usagePercent = ($maxTraffic > 0) ? ($accountTraffic / $maxTraffic) * 100 : 0;
+            if ($usagePercent >= $threshold) {
+                $activeGroupOverThreshold = true;
+                break;
+            }
+        }
+
+        if (!$activeGroupOverThreshold) {
+            return;
+        }
+
+        // Check cooldown
+        if ($lastSwitch > 0 && ($currentTime - $lastSwitch) < $cooldown) {
+            return;
+        }
+
+        // Find active group index in pool
+        $activeGroupIndex = -1;
+        foreach ($groups as $i => $group) {
+            if ($group['groupKey'] === $activeGroupKey) {
+                $activeGroupIndex = $i;
+                break;
+            }
+        }
+        if ($activeGroupIndex === -1) {
+            $activeGroupIndex = 0;
+        }
+
+        // Find next available (non-exhausted) group
+        $poolSize = count($groups);
+        $nextGroup = null;
+        for ($offset = 1; $offset < $poolSize; $offset++) {
+            $candidateIndex = ($activeGroupIndex + $offset) % $poolSize;
+            $candidate = $groups[$candidateIndex];
+            $candidateGroupKey = $candidate['groupKey'];
+
+            $candidateOverThreshold = false;
+            foreach ($accounts as $acc) {
+                if (($acc['group_key'] ?? '') !== $candidateGroupKey) {
+                    continue;
+                }
+                $maxTraffic = (float) ($acc['max_traffic'] ?? 0);
+                $candidateTraffic = $this->getGroupTrafficUsed($acc);
+                $usagePercent = ($maxTraffic > 0) ? ($candidateTraffic / $maxTraffic) * 100 : 0;
+                if ($usagePercent >= $threshold) {
+                    $candidateOverThreshold = true;
+                    break;
+                }
+            }
+
+            if (!$candidateOverThreshold) {
+                $nextGroup = $candidate;
+                break;
+            }
+        }
+
+        if (!$nextGroup) {
+            $this->db->addLog('warning', "账号池已全部耗尽，无可用账号切换！请及时检查并补充账号。");
+            $notifyResult = $this->notificationService->notifyRotationExhausted($activeGroupLabel);
+            $this->logNotificationResult($notifyResult, '账号池');
+            return;
+        }
+
+        $nextGroupKey = $nextGroup['groupKey'];
+        $nextLabel = $nextGroup['remark'] ?: (substr($nextGroup['AccessKeyId'], 0, 7) . '***');
+
+        // Start next group's instances
+        $nextGroupAccounts = array_values(array_filter($accounts, function ($a) use ($nextGroupKey) {
+            return ($a['group_key'] ?? '') === $nextGroupKey && !empty($a['instance_id']);
+        }));
+
+        $startedCount = 0;
+        $newIp = '';
+        foreach ($nextGroupAccounts as $nextAcc) {
+            $currentStatus = $this->safeGetInstanceStatus($nextAcc);
+            if ($currentStatus === 'Stopped') {
+                if ($this->safeControlInstance($nextAcc, 'start', $shutdownMode)) {
+                    $this->configManager->updateAccountStatus($nextAcc['id'], (float) ($nextAcc['traffic_used'] ?? 0), 'Starting', $currentTime);
+                    $this->configManager->updateAutoStartBlocked($nextAcc['id'], false);
+                    $startedCount++;
+                }
+            } elseif (in_array($currentStatus, ['Running', 'Starting'], true)) {
+                $startedCount++;
+            }
+
+            if ($newIp === '') {
+                $newIp = $this->getEffectivePublicIp($nextAcc);
+            }
+        }
+
+        // Update rotation state
+        $this->configManager->updateRotationState($nextGroupKey, $currentTime);
+
+        // Update entry DDNS to new group's IP
+        if ($newIp !== '') {
+            $this->syncRotationEntryDns($accounts, $nextGroupKey, $rotationConfig['entry_subdomain'], $newIp);
+        }
+
+        $this->db->addLog('warning', "账号池已切换：{$activeGroupLabel} → {$nextLabel}，已启动 {$startedCount} 台实例");
+        $entryDomain = $this->getRotationEntryDomain($rotationConfig['entry_subdomain']);
+        $notifyResult = $this->notificationService->notifyRotationSwitch(
+            $activeGroupLabel,
+            $nextLabel,
+            $entryDomain,
+            "账号 {$activeGroupLabel} 流量超限，系统自动切换到下一账号。"
+        );
+        $this->logNotificationResult($notifyResult, '账号池切换');
+    }
+
+    private function syncRotationEntryDns(array $accounts, $activeGroupKey, $entrySubdomain, $forceIp = '')
+    {
+        if (!$this->ddnsService || !$this->ddnsService->isEnabled()) {
+            return;
+        }
+
+        $entrySubdomain = trim((string) $entrySubdomain);
+        if ($entrySubdomain === '') {
+            return;
+        }
+
+        $ddnsDomain = trim((string) ($this->configManager->get('ddns_domain', '')));
+        if ($ddnsDomain === '') {
+            return;
+        }
+
+        $entryRecordName = $entrySubdomain . '.' . $ddnsDomain;
+
+        $ip = $forceIp;
+        if ($ip === '') {
+            foreach ($accounts as $account) {
+                if (($account['group_key'] ?? '') === $activeGroupKey && !empty($account['instance_id'])) {
+                    $ip = $this->getEffectivePublicIp($account);
+                    if ($ip !== '') {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($ip === '') {
+            return;
+        }
+
+        try {
+            $result = $this->ddnsService->syncARecord($entryRecordName, $ip);
+            if (!empty($result['success']) && empty($result['skipped'])) {
+                $this->db->addLog('info', "账号池入口 DDNS 已同步 {$entryRecordName} -> {$ip}");
+            } elseif (empty($result['success'])) {
+                $this->db->addLog('warning', "账号池入口 DDNS 同步失败: " . strip_tags($result['message'] ?? '未知错误'));
+            }
+        } catch (\Exception $e) {
+            $this->db->addLog('warning', "账号池入口 DDNS 同步失败: " . strip_tags($e->getMessage()));
+        }
+    }
+
+    private function getRotationEntryDomain($entrySubdomain)
+    {
+        $subdomain = trim((string) $entrySubdomain);
+        $domain = trim((string) ($this->configManager->get('ddns_domain', '')));
+        if ($subdomain === '' || $domain === '') {
+            return '';
+        }
+        return $subdomain . '.' . $domain;
     }
 }

@@ -202,6 +202,44 @@ class NotificationService
         return $this->dispatchNotifications($title, '公网 IP 已成功更换，DDNS 解析已同步更新。', $details, 'success', $textMsg, $accountLabel);
     }
 
+    public function notifyRotationSwitch($fromLabel, $toLabel, $entryDomain, $reason = '')
+    {
+        $title = '账号池已自动切换';
+        $details = [
+            ['label' => '原账号', 'value' => $fromLabel],
+            ['label' => '新账号', 'value' => $toLabel, 'highlight' => true],
+            ['label' => '入口域名', 'value' => $entryDomain ?: '未配置'],
+            ['label' => '切换时间', 'value' => date('Y-m-d H:i:s')],
+            ['label' => '切换原因', 'value' => $reason ?: '流量超限自动切换']
+        ];
+
+        $textMsg = "【ECS 服务器管家】{$title}\n" .
+            "原账号: {$fromLabel}\n" .
+            "新账号: {$toLabel}\n" .
+            "入口域名: " . ($entryDomain ?: '未配置') . "\n" .
+            "切换时间: " . date('Y-m-d H:i:s') . "\n" .
+            "切换原因: " . ($reason ?: '流量超限自动切换');
+
+        return $this->dispatchNotifications($title, "账号池切换：{$fromLabel} → {$toLabel}", $details, 'warning', $textMsg, $fromLabel);
+    }
+
+    public function notifyRotationExhausted($lastLabel)
+    {
+        $title = '账号池已全部耗尽';
+        $details = [
+            ['label' => '最后账号', 'value' => $lastLabel],
+            ['label' => '发生时间', 'value' => date('Y-m-d H:i:s')],
+            ['label' => '状态说明', 'value' => '账号池中所有账号流量均已超限，请检查并补充账号。', 'highlight' => true]
+        ];
+
+        $textMsg = "【ECS 服务器管家】{$title}\n" .
+            "最后账号: {$lastLabel}\n" .
+            "账号池中所有账号流量均已超限，请检查并补充账号。\n" .
+            "发生时间: " . date('Y-m-d H:i:s');
+
+        return $this->dispatchNotifications($title, '账号池已耗尽，请手动处理', $details, 'warning', $textMsg, $lastLabel);
+    }
+
     private function statusLabel($status)
     {
         $map = [
