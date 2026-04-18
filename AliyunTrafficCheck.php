@@ -457,9 +457,6 @@ class AliyunTrafficCheck
         // 普通/重要日志保留 30 天，高频心跳日志仅保留 3 天
         $this->db->pruneLogs(30, 3);
 
-        // 关键改动：每次清理后重排 ID，保证 ID 永远紧凑
-        $this->db->reorderLogsIds();
-
         $this->db->pruneStats();
 
         // 优化：每天凌晨 04:xx 执行一次 VACUUM 整理数据库碎片

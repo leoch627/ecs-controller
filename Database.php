@@ -104,6 +104,8 @@ class Database
         }
 
         $this->pdo->exec("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, message TEXT, created_at INTEGER)");
+        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_logs_type_id ON logs (type, id DESC)");
+        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_logs_type_created_at ON logs (type, created_at)");
 
         $this->pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

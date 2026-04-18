@@ -56,6 +56,12 @@ RUN apk add --no-cache \
     # 配置 PHP
     && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
     && sed -i "s/;date.timezone =/date.timezone = Asia\/Shanghai/g" "$PHP_INI_DIR/php.ini" \
+    && sed -i "s/^pm.max_children = .*/pm.max_children = 24/" /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i "s/^pm.start_servers = .*/pm.start_servers = 6/" /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i "s/^pm.min_spare_servers = .*/pm.min_spare_servers = 4/" /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i "s/^pm.max_spare_servers = .*/pm.max_spare_servers = 12/" /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i "s/^;pm.max_requests =.*/pm.max_requests = 500/" /usr/local/etc/php-fpm.d/www.conf \
+    && sed -i "s/^;request_terminate_timeout = 0/request_terminate_timeout = 120s/" /usr/local/etc/php-fpm.d/www.conf \
     # 清理构建依赖和缓存
     && apk del .build-deps \
     && rm -rf /var/cache/apk/* \
