@@ -11,6 +11,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="static/tailwind-compiled.css">
+    <script>
+        // 自动跟随系统主题
+        (function() {
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (prefersDark) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
     <style>
         :root {
             --canvas: #f8fafc;
@@ -25,6 +34,104 @@
             --danger: #ef4444;
             --warning: #f59e0b;
             --success: #10b981;
+            --input-bg: #ffffff;
+            --glass-input-border: #e5e7eb;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --canvas: #0f172a;
+                --panel: #1e293b;
+                --panel-strong: #334155;
+                --line: #334155;
+                --text: #f1f5f9;
+                --muted: #94a3b8;
+                --accent: #818cf8;
+                --accent-strong: #6366f1;
+                --accent-light: #312e81;
+                --danger: #f87171;
+                --warning: #fbbf24;
+                --success: #34d399;
+                --danger-bg: #7f1d1d;
+                --danger-text: #fca5a5;
+                --warning-bg: #78350f;
+                --warning-text: #fcd34d;
+                --success-bg: #064e3b;
+                --success-text: #6ee7b7;
+                --input-bg: #1e293b;
+                --glass-input-border: #475569;
+                --status-running-bg: #064e3b;
+                --status-running-text: #6ee7b7;
+                --status-stopped-bg: #7f1d1d;
+                --status-stopped-text: #fca5a5;
+                --status-transition-bg: #78350f;
+                --status-transition-text: #fcd34d;
+                --status-unknown-bg: #374151;
+                --status-unknown-text: #9ca3af;
+                --hover-bg: #334155;
+            }
+        }
+
+        [data-theme="light"] {
+            --canvas: #f8fafc;
+            --panel: #ffffff;
+            --panel-strong: #ffffff;
+            --line: #e5e7eb;
+            --text: #111827;
+            --muted: #6b7280;
+            --accent: #4f46e5;
+            --accent-strong: #4338ca;
+            --accent-light: #eef2ff;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --input-bg: #ffffff;
+            --glass-input-border: #e5e7eb;
+        }
+
+        [data-theme="dark"] {
+            --canvas: #0f172a;
+            --panel: #1e293b;
+            --panel-strong: #334155;
+            --line: #334155;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #818cf8;
+            --accent-strong: #6366f1;
+            --accent-light: #312e81;
+            --danger: #f87171;
+            --warning: #fbbf24;
+            --success: #34d399;
+            --danger-bg: #7f1d1d;
+            --danger-text: #fca5a5;
+            --warning-bg: #78350f;
+            --warning-text: #fcd34d;
+            --success-bg: #064e3b;
+            --success-text: #6ee7b7;
+            --input-bg: #1e293b;
+            --glass-input-border: #475569;
+            --status-running-bg: #064e3b;
+            --status-running-text: #6ee7b7;
+            --status-stopped-bg: #7f1d1d;
+            --status-stopped-text: #fca5a5;
+            --status-transition-bg: #78350f;
+            --status-transition-text: #fcd34d;
+            --status-unknown-bg: #374151;
+            --status-unknown-text: #9ca3af;
+            --hover-bg: #334155;
+        }
+
+        /* 暗色模式 Tailwind 类覆盖 */
+        [data-theme="dark"] .bg-white\/65 {
+            background: rgba(30, 41, 59, 0.65);
+        }
+
+        [data-theme="dark"] .border-slate-200\/70 {
+            border-color: rgba(51, 65, 85, 0.7);
+        }
+
+        [data-theme="dark"] .bg-white\/70 {
+            background: rgba(30, 41, 59, 0.7);
         }
 
         @keyframes panel-fade-up {
@@ -92,8 +199,8 @@
         .glass-input,
         .glass-textarea {
             width: 100%;
-            border: 1px solid #e5e7eb;
-            background: #ffffff;
+            border: 1px solid var(--glass-input-border);
+            background: var(--input-bg);
             color: var(--text);
             border-radius: 10px;
             padding: 0.65rem 0.85rem;
@@ -115,7 +222,7 @@
 
         .glass-input:hover,
         .glass-textarea:hover {
-            border-color: #d1d5db;
+            border-color: var(--line);
         }
 
         input[type="number"] {
@@ -160,14 +267,14 @@
             gap: 12px;
             padding: 0.6rem 0.85rem;
             border-radius: 10px;
-            border: 1px solid #e5e7eb;
-            background: #ffffff;
+            border: 1px solid var(--glass-input-border);
+            background: var(--input-bg);
             color: var(--text);
             transition: border-color .15s ease, box-shadow .15s ease;
         }
 
         .select-trigger:hover {
-            border-color: #d1d5db;
+            border-color: var(--line);
         }
 
         .select-shell.open .select-trigger,
@@ -203,7 +310,7 @@
             align-items: center;
             justify-content: center;
             border-radius: 6px;
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             color: var(--muted);
             flex-shrink: 0;
             transition: transform .15s ease;
@@ -223,7 +330,7 @@
             padding: 4px;
             border-radius: 12px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
         }
 
@@ -254,7 +361,7 @@
         }
 
         .select-option:hover {
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
         }
 
         .select-option.selected {
@@ -300,7 +407,7 @@
             border-radius: 12px;
             padding: 12px 16px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         }
 
@@ -386,7 +493,7 @@
         }
 
         .menu-button:hover {
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             color: var(--text);
         }
 
@@ -403,7 +510,7 @@
             align-items: center;
             justify-content: center;
             border-radius: 8px;
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             color: var(--accent);
             flex-shrink: 0;
         }
@@ -420,7 +527,7 @@
         .metric-card {
             border-radius: 14px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             padding: 1.5rem;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
             transition: box-shadow .2s ease, border-color .2s ease;
@@ -429,7 +536,7 @@
 
         .metric-card:hover {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-            border-color: #d1d5db;
+            border-color: var(--line);
         }
 
         .section-title {
@@ -450,30 +557,30 @@
         }
 
         .status-running {
-            background: #ecfdf5;
-            color: #059669;
+            background: var(--status-running-bg, #ecfdf5);
+            color: var(--status-running-text, #059669);
         }
 
         .status-stopped,
         .status-released {
-            background: #fef2f2;
-            color: #dc2626;
+            background: var(--status-stopped-bg, #fef2f2);
+            color: var(--status-stopped-text, #dc2626);
         }
 
         .status-transition {
-            background: #fffbeb;
-            color: #d97706;
+            background: var(--status-transition-bg, #fffbeb);
+            color: var(--status-transition-text, #d97706);
         }
 
         .status-unknown {
-            background: #f3f4f6;
-            color: #6b7280;
+            background: var(--status-unknown-bg, #f3f4f6);
+            color: var(--status-unknown-text, #6b7280);
         }
 
         .table-shell {
             border-radius: 14px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             overflow: hidden;
             animation: panel-fade-up .3s ease both;
         }
@@ -490,7 +597,7 @@
             width: 100%;
             height: 6px;
             border-radius: 3px;
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             overflow: hidden;
             border: none !important;
             box-shadow: none !important;
@@ -536,13 +643,13 @@
         }
 
         .ghost-button {
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             border: 1px solid var(--line);
             color: var(--text);
         }
 
         .ghost-button:hover {
-            background: #e5e7eb;
+            background: var(--line);
             opacity: 1;
         }
 
@@ -553,21 +660,21 @@
         }
 
         .success-button {
-            background: #ecfdf5;
-            border: 1px solid #d1fae5;
-            color: #059669;
+            background: var(--success-bg, #ecfdf5);
+            border: 1px solid var(--success-border, #d1fae5);
+            color: var(--success-text, #059669);
         }
 
         .warning-button {
-            background: #fffbeb;
-            border: 1px solid #fef3c7;
-            color: #d97706;
+            background: var(--warning-bg, #fffbeb);
+            border: 1px solid var(--warning-border, #fef3c7);
+            color: var(--warning-text, #d97706);
         }
 
         .danger-button {
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            color: #dc2626;
+            background: var(--danger-bg, #fef2f2);
+            border: 1px solid var(--danger-border, #fecaca);
+            color: var(--danger-text, #dc2626);
         }
 
         .sync-button {
@@ -595,7 +702,7 @@
             margin-top: 6px;
             font-size: 12px;
             line-height: 1.45;
-            color: #7c8698;
+            color: var(--muted);
         }
 
         .sync-note.error {
@@ -665,7 +772,7 @@
             padding: 0.2rem 0.55rem;
             border-radius: 6px;
             border: 1px solid var(--line);
-            background: #f9fafb;
+            background: var(--panel);
             font-size: 0.75rem;
             color: var(--muted);
         }
@@ -676,7 +783,7 @@
         }
 
         .switch-row:hover {
-            background: #f9fafb;
+            background: var(--panel);
         }
 
         .switch-control {
@@ -698,7 +805,7 @@
             position: absolute;
             inset: 0;
             border-radius: 999px;
-            background: #d1d5db;
+            background: var(--line);
             transition: background .15s ease;
         }
 
@@ -733,13 +840,13 @@
             grid-template-columns: minmax(180px, 1.45fr) minmax(120px, 0.9fr) minmax(110px, 0.8fr) 180px 220px 180px;
             gap: 0.85rem;
             padding: 0.85rem 1rem;
-            border-bottom: 1px solid #f3f4f6;
+            border-bottom: 1px solid var(--line);
             align-items: center;
             transition: background .1s ease;
         }
 
         .account-row:hover {
-            background: #f9fafb;
+            background: var(--panel);
         }
 
         .account-row:last-child {
@@ -761,7 +868,7 @@
         }
 
         .summary-table-head {
-            background: #f9fafb;
+            background: var(--panel);
             color: var(--muted);
             font-size: 0.75rem;
             font-weight: 600;
@@ -854,7 +961,7 @@
             margin-top: 16px;
             border: 1px solid var(--line);
             border-radius: 12px;
-            background: #f9fafb;
+            background: var(--panel);
             padding: 16px;
         }
 
@@ -901,7 +1008,7 @@
             border: 1px solid var(--line);
             border-radius: 10px;
             padding: 10px 12px;
-            background: #f9fafb;
+            background: var(--panel);
             font-size: 0.875rem;
             color: #374151;
         }
@@ -1110,7 +1217,7 @@
             justify-content: space-between;
             gap: 12px;
             border-radius: 8px;
-            background: #ffffff;
+            background: var(--panel);
             padding: 8px 10px;
         }
 
@@ -1209,7 +1316,7 @@
             flex: 0 0 48px;
             border-radius: 16px;
             object-fit: contain;
-            background: #ffffff;
+            background: var(--panel);
             border: 1px solid rgba(148, 163, 184, 0.18);
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
         }
@@ -1233,7 +1340,7 @@
             height: 72px;
             border-radius: 20px;
             object-fit: contain;
-            background: #ffffff;
+            background: var(--panel);
             border: 1px solid var(--line);
             box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
         }
@@ -1317,7 +1424,7 @@
         }
 
         .table-scroll tbody tr:hover {
-            background: #f9fafb;
+            background: var(--panel);
         }
 
         .batch-bar-enter-active {
@@ -1420,7 +1527,7 @@
         }
 
         .muted-text-strong {
-            color: #7c8698;
+            color: var(--muted);
         }
 
         .body-text {
@@ -1428,8 +1535,12 @@
         }
 
         .text-dark-button {
-            background: #1f2937 !important;
+            background: var(--accent) !important;
             color: #fff !important;
+        }
+
+        [data-theme="dark"] .text-dark-button {
+            background: var(--accent-strong) !important;
         }
 
         .compact-button {
@@ -1470,19 +1581,19 @@
         }
 
         .text-slate-500 {
-            color: #6f7787;
+            color: var(--muted);
         }
 
         .text-slate-400 {
-            color: #7c8698;
+            color: var(--muted);
         }
 
         .text-\[\#6f7787\] {
             color: #6f7787;
         }
 
-        .text-\[\#7c8698\] {
-            color: #7c8698;
+        .text-\[\var(--muted)\] {
+            color: var(--muted);
         }
 
         .text-\[\#334155\] {
@@ -1902,13 +2013,13 @@
                                     <div class="min-w-0">
                                         <p class="subtle-label">备注</p>
                                         <h3 class="mt-1 truncate text-lg font-bold">{{ item.remark || item.instanceName || item.instanceId }}</h3>
-                                        <p class="mt-1 text-xs text-[#7c8698]">{{ item.accountLabel }}</p>
+                                        <p class="mt-1 text-xs text-[var(--muted)]">{{ item.accountLabel }}</p>
                                     </div>
                                     <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
                                         <span v-if="!(item.status === 'Stopped' && item.stoppedMode === 'StopCharging')" class="status-pill" :class="statusClass(item.instanceStatus)">
                                             {{ statusText(item.instanceStatus) }}
                                         </span>
-                                        <span v-else class="status-pill status-unknown !bg-slate-100 !border !border-slate-200 !text-slate-600">
+                                        <span v-else class="status-pill status-unknown">
                                             节省停机
                                         </span>
                                         <span v-if="item.status === 'Running' && item.healthStatus === 'Initializing'" class="status-pill status-transition !text-[10px] animate-pulse">
@@ -1920,17 +2031,17 @@
                                 <div class="mt-8 space-y-5">
                                     <div class="grid grid-cols-2 gap-5">
                                         <div class="min-w-0">
-                                            <p class="text-[13px] text-[#7c8698] mb-1">硬件系统</p>
+                                            <p class="text-[13px] text-[var(--muted)] mb-1">硬件系统</p>
                                             <p class="text-[14px] text-slate-700 truncate" :title="item.osName">{{ item.osName || '-' }}</p>
                                         </div>
                                         <div class="min-w-0">
-                                            <p class="text-[13px] text-[#7c8698] mb-1">规格</p>
+                                            <p class="text-[13px] text-[var(--muted)] mb-1">规格</p>
                                             <p class="text-[14px] text-slate-700 font-semibold">{{ item.cpu }} 核 {{ item.memory < 1024 ? item.memory + ' MiB' : (item.memory/1024).toFixed(1) + ' GiB' }}</p>
                                         </div>
                                     </div>
                                     <div class="grid grid-cols-1">
                                         <div class="min-w-0">
-                                            <p class="text-[13px] text-[#7c8698] mb-1">公网 IP</p>
+                                            <p class="text-[13px] text-[var(--muted)] mb-1">公网 IP</p>
                                             <p class="text-[14px] text-slate-700 font-mono">{{ isAdmin ? (item.publicIp || '-') : '登录后可见' }}</p>
                                         </div>
                                     </div>
@@ -1938,13 +2049,13 @@
 
                                 <div class="mt-8">
                                     <div class="flex items-end justify-between mb-3">
-                                        <span class="text-[12px] text-[#7c8698]">流量消耗 ({{ item.percentageOfUse }}%)</span>
+                                        <span class="text-[12px] text-[var(--muted)]">流量消耗 ({{ item.percentageOfUse }}%)</span>
                                         <span class="text-[15px] font-bold text-slate-800">
                                             <template v-if="hasTrafficIssue(item)">
                                                 <span class="text-[#dc2626] text-[14px]">{{ trafficIssueText(item) }}</span>
                                             </template>
                                             <template v-else>
-                                                {{ formatTrafficValue(item.flow_used) }} <span class="text-[#7c8698] font-normal text-[14px]">/ {{ item.flow_total }} GB</span>
+                                                {{ formatTrafficValue(item.flow_used) }} <span class="text-[var(--muted)] font-normal text-[14px]">/ {{ item.flow_total }} GB</span>
                                             </template>
                                         </span>
                                     </div>
@@ -1955,8 +2066,8 @@
                                     <p v-if="hasTrafficIssue(item)" class="mt-2 text-xs text-[#dc2626]">{{ trafficIssueText(item) }}</p>
                                 </div>
 
-                                <div class="mt-6 flex items-center justify-between pt-4 text-xs text-[#7c8698]">
-                                    <div class="flex items-center gap-1.5 text-[11px] text-[#7c8698]">
+                                <div class="mt-6 flex items-center justify-between pt-4 text-xs text-[var(--muted)]">
+                                    <div class="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
                                         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                         <span>{{ item.lastUpdated }}</span>
                                     </div>
@@ -1970,7 +2081,7 @@
                             </article>
 
                             <div v-if="filteredStatusInstances.length === 0" class="metric-card" style="grid-column: 1 / -1;">
-                                <p class="text-center text-sm text-[#7c8698]">暂无实例状态数据。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">暂无实例状态数据。</p>
                             </div>
                         </div>
                     </section>
@@ -2023,7 +2134,7 @@
                         </div>
 
                         <div class="table-shell desktop-visible" style="margin-top: 24px;">
-                            <div class="bg-white/65 px-5 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[#7c8698]">
+                            <div class="bg-white/65 px-5 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
                                 列表模式
                             </div>
                             <div class="overflow-x-auto">
@@ -2085,7 +2196,7 @@
                                     </div>
                                 </div>
 
-                                <div v-if="filteredManagedInstances.length === 0" class="px-5 py-12 text-center text-sm text-[#7c8698]">
+                                <div v-if="filteredManagedInstances.length === 0" class="px-5 py-12 text-center text-sm text-[var(--muted)]">
                                     暂无实例数据，点击"手动同步"获取最新实例。
                                 </div>
                                 </div>
@@ -2097,15 +2208,15 @@
                                 <div class="flex items-start justify-between gap-3">
                                     <div>
                                         <p class="text-base font-bold">{{ inst.remark || inst.instanceName || inst.instanceId }}</p>
-                                        <p class="mt-1 font-mono text-xs text-[#7c8698]">{{ inst.instanceId }}</p>
+                                        <p class="mt-1 font-mono text-xs text-[var(--muted)]">{{ inst.instanceId }}</p>
                                     </div>
                                 </div>
                                 <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
-                                    <div><span class="text-[#7c8698]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
-                                    <div><span class="text-[#7c8698]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
-                                    <div><span class="text-[#7c8698]">状态</span><p class="mt-1"><span class="status-pill" :class="statusClass(inst.instanceStatus)">{{ statusText(inst.instanceStatus) }}</span></p></div>
-                                    <div><span class="text-[#7c8698]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[#7c8698]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
-                                    <div><span class="text-[#7c8698]">公网带宽峰值</span><p class="mt-1">{{ inst.internetMaxBandwidthOut ? inst.internetMaxBandwidthOut + ' Mbps' : '-' }}</p></div>
+                                    <div><span class="text-[var(--muted)]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
+                                    <div><span class="text-[var(--muted)]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
+                                    <div><span class="text-[var(--muted)]">状态</span><p class="mt-1"><span class="status-pill" :class="statusClass(inst.instanceStatus)">{{ statusText(inst.instanceStatus) }}</span></p></div>
+                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
+                                    <div><span class="text-[var(--muted)]">公网带宽峰值</span><p class="mt-1">{{ inst.internetMaxBandwidthOut ? inst.internetMaxBandwidthOut + ' Mbps' : '-' }}</p></div>
                                 </div>
                                 <div v-if="inst.operationLocked || inst.instanceStatus === 'Releasing'" class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-700">
                                     释放中，不可操作
@@ -2119,7 +2230,7 @@
                             </article>
 
                             <div v-if="filteredManagedInstances.length === 0" class="metric-card">
-                                <p class="text-center text-sm text-[#7c8698]">暂无实例数据。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">暂无实例数据。</p>
                             </div>
                         </div>
                     </section>
@@ -2137,7 +2248,7 @@
                         </div>
 
                         <div class="table-shell desktop-visible" style="margin-top: 24px;">
-                            <div class="bg-white/65 px-4 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[#7c8698]">
+                            <div class="bg-white/65 px-4 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
                                 列表模式
                             </div>
                             <div>
@@ -2211,7 +2322,7 @@
 	                                </div>
 
                                 <div v-if="config.Accounts.length === 0" class="account-row">
-                                    <div class="summary-cell" style="grid-column: 1 / -1; text-align: center; color: #7c8698;">
+                                    <div class="summary-cell" style="grid-column: 1 / -1; text-align: center; color: var(--muted);">
                                         还没有账号，点击“新增账号”开始配置。
                                     </div>
                                 </div>
@@ -2222,7 +2333,7 @@
                             <article v-for="(acc, idx) in config.Accounts" :key="'account-card-' + idx" class="metric-card">
                                 <div class="flex items-center justify-between">
                                     <h3 class="text-base font-bold">{{ acc.remark || `账号 ${idx + 1}` }}</h3>
-                                    <span class="text-xs text-[#7c8698]">{{ acc.instanceCount || 0 }} 台实例</span>
+                                    <span class="text-xs text-[var(--muted)]">{{ acc.instanceCount || 0 }} 台实例</span>
                                 </div>
                                 <div class="account-card-grid">
                                     <div>区域：{{ getRegionName(acc.regionId) }}</div>
@@ -2257,7 +2368,7 @@
                             </article>
 
                             <div v-if="config.Accounts.length === 0" class="metric-card">
-                                <p class="text-center text-sm text-[#7c8698]">还没有账号，点击“新增账号”开始配置。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">还没有账号，点击“新增账号”开始配置。</p>
                             </div>
                         </div>
                     </section>
@@ -2289,7 +2400,7 @@
                                                     </label>
                                                     <button v-if="config.AppBrand.logo_url" @click="clearLogo" type="button" class="danger-button">清除 Logo</button>
                                                 </div>
-                                                <p class="text-xs leading-5 text-[#7c8698]">支持 PNG、JPG、WebP，上传文件小于 2MB。也可以直接填写图片 URL。</p>
+                                                <p class="text-xs leading-5 text-[var(--muted)]">支持 PNG、JPG、WebP，上传文件小于 2MB。也可以直接填写图片 URL。</p>
                                             </div>
                                         </div>
                                     </div>
@@ -2387,7 +2498,7 @@
                                     <input type="hidden" v-model="config.Ddns.provider">
                                     <div class="rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
                                         <div class="font-bold text-[#1f2937]">Cloudflare</div>
-                                        <div class="mt-1 text-xs leading-5 text-[#7c8698]">当前仅支持 Cloudflare，后续可扩展其他 DNS 服务商。</div>
+                                        <div class="mt-1 text-xs leading-5 text-[var(--muted)]">当前仅支持 Cloudflare，后续可扩展其他 DNS 服务商。</div>
                                     </div>
                                     <div>
                                         <label class="mb-2 block text-sm font-semibold text-[#6f7787]">Cloudflare API Token</label>
@@ -2410,7 +2521,7 @@
                                             <span class="switch-slider"></span>
                                         </span>
                                     </label>
-                                    <p class="text-xs leading-6 text-[#7c8698]">
+                                    <p class="text-xs leading-6 text-[var(--muted)]">
                                         必填：API Token 和根域名。Zone ID 可不填，系统会根据根域名自动查询。命名规则：单机器使用“账号备注.根域名”；同账号多机器使用“账号备注-实例备注或实例短 ID.根域名”。
                                     </p>
                                 </div>
@@ -2534,18 +2645,20 @@
                             <article v-for="log in systemLogs" :key="log.id || log.time_str + log.message" class="metric-card log-card">
                                 <div class="flex flex-wrap items-center justify-between gap-2">
                                     <div class="flex items-center gap-2">
-                                        <span v-if="currentLogTab === 'action'" class="status-pill"
-                                            :class="log.type === 'warning' ? 'status-transition' : log.type === 'error' ? 'status-stopped' : 'status-running'">
+                                        <span class="status-pill"
+                                            :class="currentLogTab === 'action'
+                                                ? (log.type === 'warning' ? 'status-transition' : log.type === 'error' ? 'status-stopped' : 'status-running')
+                                                : (log.type === 'error' ? 'status-stopped' : log.type === 'warning' ? 'status-transition' : 'status-running')">
                                             {{ logTypeLabel(log.type) }}
                                         </span>
-                                        <span class="text-xs text-[#7c8698] font-mono">{{ log.time_str }}</span>
+                                        <span class="text-xs text-[var(--muted)] font-mono">{{ log.time_str }}</span>
                                     </div>
                                 </div>
-                                <p class="mt-3 font-mono text-sm leading-6 text-[#334155]">{{ log.message }}</p>
+                                <p class="mt-3 font-mono text-sm leading-6">{{ log.message }}</p>
                             </article>
 
                             <div v-if="systemLogs.length === 0" class="metric-card">
-                                <p class="text-center text-sm text-[#7c8698]">当前没有日志记录。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">当前没有日志记录。</p>
                             </div>
                         </div>
                     </section>
@@ -3193,6 +3306,7 @@
                 const allInstances = ref([]);
                 const systemLogs = ref([]);
                 const initialized = ref(true);
+
                 const loadingCheckInit = ref(true);
                 const loading = ref(true);
                 const checkingLogin = ref(true);
