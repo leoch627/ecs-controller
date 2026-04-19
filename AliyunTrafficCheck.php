@@ -1774,26 +1774,8 @@ class AliyunTrafficCheck
 
             try {
                 if ($status === 'Stopped') {
-                    if (($account['public_ip_mode'] ?? '') === 'eip' && !empty($account['eip_managed'])) {
-                        try {
-                            if ($this->aliyunService->releaseManagedEip($account)) {
-                                $this->db->addLog('info', "托管 EIP 已随实例释放 [{$accountLabel}] {$account['eip_address']}");
-                                $this->configManager->updateAccountNetworkMetadata($account['id'], [
-                                    'public_ip' => '',
-                                    'public_ip_mode' => 'eip',
-                                    'eip_allocation_id' => '',
-                                    'eip_address' => '',
-                                    'eip_managed' => 0,
-                                    'internet_max_bandwidth_out' => $account['internet_max_bandwidth_out'] ?? 0
-                                ]);
-                                $account['eip_allocation_id'] = '';
-                                $account['eip_address'] = '';
-                                $account['eip_managed'] = 0;
-                            }
-                        } catch (\Exception $e) {
-                            $this->db->addLog('warning', "托管 EIP 释放失败，将于下一轮重试 [{$accountLabel}]: " . strip_tags($e->getMessage()));
-                            continue;
-                        }
+                    if (!$this->releaseManagedEipForPendingAccount($account, $accountLabel)) {
+                        continue;
                     }
                     $result = $this->aliyunService->deleteInstance($account, false);
                     if ($result) {
@@ -1810,9 +1792,17 @@ class AliyunTrafficCheck
                         $this->configManager->physicallyDeleteAccount($account['id']);
                         $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '异步释放后同步');
                     }
-                } elseif ($status === 'NotFound' || $status === 'Unknown') {
+                } elseif ($status === 'NotFound') {
+                    if (!$this->releaseManagedEipForPendingAccount($account, $accountLabel)) {
+                        continue;
+                    }
                     $this->db->addLog('warning', "待释放实例云端已灭迹，自动擦除本地账本 [{$accountLabel}]");
+                    $accountsBeforeDelete = $this->configManager->getAccounts();
+                    $this->deleteDdnsForAccount($account, $accountsBeforeDelete, '实例已灭迹后清理');
                     $this->configManager->physicallyDeleteAccount($account['id']);
+                    $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '实例灭迹后同步');
+                } elseif ($status === 'Unknown') {
+                    $this->db->addLog('warning', "后台异步释放引擎暂时无法确认实例状态，将于下一轮重试 [{$accountLabel}]");
                 } elseif (!in_array($status, ['Stopping'])) {
                     $this->db->addLog('info', "后台异步释放引擎：向活跃实例下发强制离线指令 [{$accountLabel}]");
                     // 仅调用 stop 并允许返回，不产生同步堵塞死循环
@@ -1822,6 +1812,35 @@ class AliyunTrafficCheck
                 // 如果 DeleteInstance 等遇到暂时性 API 禁止，让它下一分钟随 Cron 重新再轮询一次，不需要人工介入
                 $this->db->addLog('error', "后台异步释放行动异常，将于下一分钟轮询重试 [{$accountLabel}]: " . $e->getMessage());
             }
+        }
+    }
+
+    private function releaseManagedEipForPendingAccount(array &$account, $accountLabel)
+    {
+        if (($account['public_ip_mode'] ?? '') !== 'eip' || empty($account['eip_managed'])) {
+            return true;
+        }
+
+        try {
+            if ($this->aliyunService->releaseManagedEip($account)) {
+                $this->db->addLog('info', "托管 EIP 已释放 [{$accountLabel}] " . ($account['eip_address'] ?? ''));
+                $this->configManager->updateAccountNetworkMetadata($account['id'], [
+                    'public_ip' => '',
+                    'public_ip_mode' => 'eip',
+                    'eip_allocation_id' => '',
+                    'eip_address' => '',
+                    'eip_managed' => 0,
+                    'internet_max_bandwidth_out' => $account['internet_max_bandwidth_out'] ?? 0
+                ]);
+                $account['public_ip'] = '';
+                $account['eip_allocation_id'] = '';
+                $account['eip_address'] = '';
+                $account['eip_managed'] = 0;
+            }
+            return true;
+        } catch (\Exception $e) {
+            $this->db->addLog('warning', "托管 EIP 释放失败，将于下一轮重试 [{$accountLabel}]: " . strip_tags($e->getMessage()));
+            return false;
         }
     }
 
