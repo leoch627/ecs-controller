@@ -3752,7 +3752,7 @@
                     fetchLogs();
                     logAutoRefresh.value = true;
                     if (logInterval) clearInterval(logInterval);
-                    logInterval = setInterval(fetchLogs, 3000);
+                    logInterval = setInterval(fetchLogs, 10000);
                 };
 
                 const stopLogPolling = () => {
