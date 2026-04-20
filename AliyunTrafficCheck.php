@@ -6,6 +6,7 @@ require_once 'ConfigManager.php';
 require_once 'AliyunService.php';
 require_once 'NotificationService.php';
 require_once 'DdnsService.php';
+require_once 'TelegramControlService.php';
 
 use AlibabaCloud\Client\Exception\ClientException;
 use AlibabaCloud\Client\Exception\ServerException;
@@ -141,9 +142,24 @@ class AliyunTrafficCheck
         return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
     }
 
-    private function resolveSecretFromDatabase($accessKeyId, $regionId)
+    private function resolveSecretFromDatabase($accessKeyId, $regionId, $groupKey = '')
     {
         $pdo = $this->db->getPdo();
+        $groupKey = trim((string) $groupKey);
+
+        if ($groupKey !== '') {
+            $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE group_key = ? LIMIT 1");
+            $stmt->execute([$groupKey]);
+            $row = $stmt->fetch();
+
+            if ($row && !empty($row['access_key_secret'])) {
+                $secret = $this->configManager->decryptAccountSecret($row['access_key_secret']);
+                if (!empty($secret)) {
+                    return $secret;
+                }
+            }
+        }
+
         $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE access_key_id = ? AND region_id = ? LIMIT 1");
         $stmt->execute([$accessKeyId, $regionId]);
         $row = $stmt->fetch();
@@ -157,8 +173,10 @@ class AliyunTrafficCheck
 
         foreach ($this->configManager->getAccountGroups() as $group) {
             if (
-                ($group['AccessKeyId'] ?? '') === $accessKeyId
-                && ($group['regionId'] ?? '') === $regionId
+                (
+                    ($groupKey !== '' && ($group['groupKey'] ?? '') === $groupKey)
+                    || (($group['AccessKeyId'] ?? '') === $accessKeyId && ($group['regionId'] ?? '') === $regionId)
+                )
                 && !empty($group['AccessKeySecret'])
                 && $group['AccessKeySecret'] !== '********'
             ) {
@@ -280,7 +298,9 @@ class AliyunTrafficCheck
                     'proxy_ip' => $settings['notify_tg_proxy_ip'] ?? '',
                     'proxy_port' => $settings['notify_tg_proxy_port'] ?? '',
                     'proxy_user' => $settings['notify_tg_proxy_user'] ?? '',
-                    'proxy_pass' => !empty($settings['notify_tg_proxy_pass']) ? '********' : ''
+                    'proxy_pass' => !empty($settings['notify_tg_proxy_pass']) ? '********' : '',
+                    'allowed_user_ids' => $settings['notify_tg_allowed_user_ids'] ?? '',
+                    'confirm_ttl' => (int) ($settings['notify_tg_confirm_ttl'] ?? 60)
                 ],
                 'webhook' => [
                     'enabled' => ($settings['notify_wh_enabled'] ?? '0') === '1',
@@ -664,7 +684,19 @@ class AliyunTrafficCheck
         // 执行异步彻底销毁循环
         $this->processPendingReleases();
 
+        $this->processTelegramControl();
+
         return implode(PHP_EOL, $logs);
+    }
+
+    private function processTelegramControl()
+    {
+        try {
+            $service = new TelegramControlService($this->db, $this->configManager, $this);
+            $service->processUpdates();
+        } catch (\Exception $e) {
+            $this->db->addLog('error', 'Telegram 控制处理失败: ' . strip_tags($e->getMessage()));
+        }
     }
 
     public function getStatusForFrontend($includeSensitive = false)
@@ -839,7 +871,7 @@ class AliyunTrafficCheck
         }
 
         if ($accessKeySecret === '********') {
-            $accessKeySecret = $this->resolveSecretFromDatabase($accessKeyId, $regionId);
+            $accessKeySecret = $this->resolveSecretFromDatabase($accessKeyId, $regionId, $account['groupKey'] ?? '');
         }
 
         try {
@@ -1644,7 +1676,7 @@ class AliyunTrafficCheck
         return $metrics;
     }
 
-    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging')
+    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true)
     {
         if ($this->initError)
             return false;
@@ -1660,7 +1692,7 @@ class AliyunTrafficCheck
                 $newStatus = $action === 'stop' ? 'Stopping' : 'Starting';
                 $this->configManager->updateAccountStatus($accountId, $targetAccount['traffic_used'], $newStatus, time());
                 $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
-                if ($action === 'start') {
+                if ($action === 'start' && $waitForSync) {
                     sleep(8);
                     $this->configManager->syncAccountGroups(true);
                     $this->configManager->load();

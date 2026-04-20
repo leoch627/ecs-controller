@@ -185,6 +185,24 @@ class Database
             updated_at INTEGER NOT NULL
         )");
 
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS telegram_bot_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )");
+
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS telegram_action_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT UNIQUE NOT NULL,
+            user_id TEXT NOT NULL,
+            chat_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            account_id INTEGER NOT NULL,
+            payload TEXT DEFAULT '',
+            expires_at INTEGER NOT NULL,
+            used_at INTEGER DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )");
+
         $this->ensureColumn('accounts', 'traffic_used', 'REAL DEFAULT 0');
         $this->ensureColumn('accounts', 'traffic_billing_month', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'instance_status', "TEXT DEFAULT 'Unknown'");

@@ -565,6 +565,8 @@ class ConfigManager
         $this->saveSetting('notify_tg_proxy_ip', $telegram['proxy_ip'] ?? '');
         $this->saveSetting('notify_tg_proxy_port', $telegram['proxy_port'] ?? '');
         $this->saveSetting('notify_tg_proxy_user', $telegram['proxy_user'] ?? '');
+        $this->saveSetting('notify_tg_allowed_user_ids', trim((string) ($telegram['allowed_user_ids'] ?? '')));
+        $this->saveSetting('notify_tg_confirm_ttl', max(30, (int) ($telegram['confirm_ttl'] ?? 60)));
 
         if (isset($telegram['proxy_pass']) && $telegram['proxy_pass'] !== '********') {
             $this->saveSetting('notify_tg_proxy_pass', $telegram['proxy_pass'] ?? '');
@@ -606,7 +608,11 @@ class ConfigManager
 
             $isPlaceholder = $accessKeySecret === '********';
             if ($isPlaceholder) {
-                $accessKeySecret = $this->resolveExistingSecret($accessKeyId, $regionId);
+                $accessKeySecret = $this->resolveExistingSecret(
+                    $accessKeyId,
+                    $regionId,
+                    trim((string) ($group['groupKey'] ?? ''))
+                );
             }
 
             if (!$allowEmpty && $accessKeyId === '' && $accessKeySecret === '' && $regionId === '') {
@@ -642,10 +648,19 @@ class ConfigManager
         return array_values($normalized);
     }
 
-    private function resolveExistingSecret($accessKeyId, $regionId)
+    private function resolveExistingSecret($accessKeyId, $regionId, $groupKey = '')
     {
         $accessKeyId = trim((string) $accessKeyId);
         $regionId = trim((string) $regionId);
+        $requestedGroupKey = trim((string) $groupKey);
+
+        if ($requestedGroupKey !== '') {
+            foreach ($this->accountsCache as $row) {
+                if (($row['group_key'] ?? '') === $requestedGroupKey && !empty($row['access_key_secret'])) {
+                    return $row['access_key_secret'];
+                }
+            }
+        }
 
         foreach ($this->accountsCache as $row) {
             if ($row['access_key_id'] === $accessKeyId && $row['region_id'] === $regionId) {
@@ -653,9 +668,9 @@ class ConfigManager
             }
         }
 
-        $groupKey = $this->buildGroupKey($accessKeyId, $regionId);
+        $derivedGroupKey = $this->buildGroupKey($accessKeyId, $regionId);
         foreach ($this->accountsCache as $row) {
-            if (($row['group_key'] === $groupKey) && !empty($row['access_key_secret'])) {
+            if (($row['group_key'] === $derivedGroupKey) && !empty($row['access_key_secret'])) {
                 return $row['access_key_secret'];
             }
         }
@@ -663,13 +678,16 @@ class ConfigManager
         $rawGroups = json_decode((string) ($this->configCache['account_groups'] ?? ''), true);
         if (is_array($rawGroups)) {
             foreach ($rawGroups as $group) {
+                $savedGroupKey = trim((string) ($group['groupKey'] ?? ''));
                 $savedAccessKeyId = trim((string) ($group['AccessKeyId'] ?? ''));
                 $savedRegionId = trim((string) ($group['regionId'] ?? ''));
                 $savedSecret = trim((string) ($group['AccessKeySecret'] ?? ''));
 
                 if (
-                    $savedAccessKeyId === $accessKeyId
-                    && $savedRegionId === $regionId
+                    (
+                        ($requestedGroupKey !== '' && $savedGroupKey === $requestedGroupKey)
+                        || ($savedAccessKeyId === $accessKeyId && $savedRegionId === $regionId)
+                    )
                     && $savedSecret !== ''
                     && $savedSecret !== '********'
                 ) {
