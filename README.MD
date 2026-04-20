@@ -61,10 +61,96 @@ docker-compose up -d
 1. **登录阿里云控制台**，前往 [RAM 访问控制 - 用户](https://ram.console.aliyun.com/users)。
 2. **创建用户**：点击“创建用户”，勾选“OpenAPI 调用访问”。
 3. **获取密钥**：保存好生成的 `AccessKey ID` 和 `AccessKey Secret`。
-4. **添加权限**：为该用户添加以下三个权限策略（必须包含）：
-   - `AliyunECSFullAccess`：用于查看实例状态、开关机及释放。
-   - `AliyunBSSFullAccess`：用于查询账号余额及消费账单。
-   - `AliyunCDTFullAccess`：用于获取 CDT 流量实时统计信息。
+4. **添加权限**：建议创建自定义 RAM 权限策略，按需授予最小权限。
+
+### 核心功能最低权限
+
+如果只使用实例同步、流量监控、自动停机、手动开关机和释放实例，至少需要：
+
+```text
+cms:DescribeMetricList
+ecs:DescribeInstances
+ecs:DescribeInstanceStatus
+ecs:StartInstance
+ecs:StopInstance
+ecs:DeleteInstance
+cdt:ListCdtInternetTraffic
+```
+
+其中 `cms:DescribeMetricList` 用于获取 ECS 公网出口流量，缺少后会导致流量统计不可用或自动停机不准确。
+
+### 全功能推荐权限
+
+如果需要使用本项目的全部功能，包括一键创建 ECS、自动创建网络与安全组、EIP 申请/绑定/释放、更换公网 IP、消费情况查询，建议使用以下自定义策略：
+
+```json
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeRegions",
+        "ecs:DescribeZones",
+        "ecs:DescribeInstances",
+        "ecs:DescribeInstanceStatus",
+        "ecs:DescribeInstancesFullStatus",
+        "ecs:DescribeInstanceTypes",
+        "ecs:DescribeImages",
+        "ecs:DescribeAvailableResource",
+        "ecs:DescribeSecurityGroups",
+        "ecs:StartInstance",
+        "ecs:StopInstance",
+        "ecs:DeleteInstance",
+        "ecs:RunInstances",
+        "ecs:CreateSecurityGroup",
+        "ecs:AuthorizeSecurityGroup"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "vpc:DescribeVpcs",
+        "vpc:DescribeVSwitches",
+        "vpc:CreateVpc",
+        "vpc:CreateVSwitch",
+        "vpc:DescribeEipAddresses",
+        "vpc:AllocateEipAddress",
+        "vpc:AssociateEipAddress",
+        "vpc:UnassociateEipAddress",
+        "vpc:ReleaseEipAddress"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cms:DescribeMetricList"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cdt:ListCdtInternetTraffic"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bssapi:QueryAccountBalance",
+        "bssapi:DescribeInstanceBill",
+        "bssapi:QueryBillOverview"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+如果不需要消费情况展示，可以去掉 `bssapi:*` 相关权限。
 
 ---
 

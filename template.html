@@ -627,11 +627,18 @@
         .danger-button,
         .success-button,
         .warning-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
             border-radius: 8px;
             padding: 0.5rem 0.85rem;
             font-size: 0.8rem;
             font-weight: 600;
-            transition: background .12s ease, opacity .12s ease;
+            transform: translateY(0);
+            cursor: pointer;
+            user-select: none;
+            transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .12s ease, opacity .12s ease;
         }
 
         .ghost-button:hover,
@@ -639,7 +646,37 @@
         .danger-button:hover,
         .success-button:hover,
         .warning-button:hover {
-            opacity: 0.85;
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+        }
+
+        .ghost-button:active,
+        .solid-button:active,
+        .danger-button:active,
+        .success-button:active,
+        .warning-button:active {
+            transform: translateY(0) scale(0.98);
+            box-shadow: none;
+        }
+
+        .ghost-button:focus-visible,
+        .solid-button:focus-visible,
+        .danger-button:focus-visible,
+        .success-button:focus-visible,
+        .warning-button:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .ghost-button:disabled,
+        .solid-button:disabled,
+        .danger-button:disabled,
+        .success-button:disabled,
+        .warning-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+            transform: none;
+            box-shadow: none;
         }
 
         .ghost-button {
@@ -659,10 +696,19 @@
             border: none;
         }
 
+        .solid-button:hover {
+            background: var(--accent-strong);
+        }
+
         .success-button {
             background: var(--success-bg, #ecfdf5);
             border: 1px solid var(--success-border, #d1fae5);
             color: var(--success-text, #059669);
+        }
+
+        .success-button:hover {
+            background: color-mix(in srgb, var(--success) 18%, var(--panel));
+            border-color: color-mix(in srgb, var(--success) 42%, var(--line));
         }
 
         .warning-button {
@@ -671,10 +717,20 @@
             color: var(--warning-text, #d97706);
         }
 
+        .warning-button:hover {
+            background: color-mix(in srgb, var(--warning) 18%, var(--panel));
+            border-color: color-mix(in srgb, var(--warning) 42%, var(--line));
+        }
+
         .danger-button {
             background: var(--danger-bg, #fef2f2);
             border: 1px solid var(--danger-border, #fecaca);
             color: var(--danger-text, #dc2626);
+        }
+
+        .danger-button:hover {
+            background: color-mix(in srgb, var(--danger) 18%, var(--panel));
+            border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
         }
 
         .sync-button {
@@ -1008,10 +1064,25 @@
             color: var(--accent);
             font-size: 0.8rem;
             font-weight: 700;
+            transition: background .16s ease, color .16s ease, transform .12s ease;
+        }
+
+        .time-picker__action:hover {
+            background: var(--accent-light);
+            transform: translateY(-1px);
+        }
+
+        .time-picker__action:active {
+            transform: translateY(0) scale(0.98);
         }
 
         .time-picker__confirm {
             background: var(--accent);
+            color: #fff;
+        }
+
+        .time-picker__confirm:hover {
+            background: var(--accent-strong);
             color: #fff;
         }
 
