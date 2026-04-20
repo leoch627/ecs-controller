@@ -799,6 +799,7 @@
             inset: 0;
             opacity: 0;
             cursor: pointer;
+            z-index: 2;
         }
 
         .switch-slider {
@@ -807,6 +808,7 @@
             border-radius: 999px;
             background: var(--line);
             transition: background .15s ease;
+            pointer-events: none;
         }
 
         .switch-slider::after {
@@ -833,6 +835,205 @@
         .switch-control input:focus-visible + .switch-slider {
             outline: 2px solid var(--accent);
             outline-offset: 2px;
+        }
+
+        .schedule-card {
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            background: color-mix(in srgb, var(--panel) 82%, transparent);
+            padding: 1rem;
+        }
+
+        .schedule-card__header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .schedule-card__hint {
+            margin-top: 0.2rem;
+            color: var(--muted);
+            font-size: 0.75rem;
+            line-height: 1.6;
+        }
+
+        .schedule-option {
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            background: color-mix(in srgb, var(--panel-strong) 78%, transparent);
+            padding: 1rem;
+        }
+
+        .schedule-option__top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .time-picker {
+            position: relative;
+            width: 100%;
+        }
+
+        .time-picker__trigger {
+            width: 100%;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            border: 1px solid var(--glass-input-border);
+            border-radius: 12px;
+            background: var(--input-bg);
+            color: var(--text);
+            padding: 0.65rem 0.85rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-align: left;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+
+        .time-picker.open .time-picker__trigger,
+        .time-picker__trigger:focus-visible {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+        }
+
+        .time-picker__trigger:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .time-picker__value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        }
+
+        .time-picker__placeholder {
+            color: var(--muted);
+            font-family: inherit;
+            font-weight: 500;
+        }
+
+        .time-picker__icon {
+            width: 1.35rem;
+            height: 1.35rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            flex: 0 0 auto;
+        }
+
+        .time-picker__panel {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            z-index: 80;
+            width: min(280px, calc(100vw - 40px));
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--panel);
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+            padding: 0.65rem;
+        }
+
+        .time-picker.drop-up .time-picker__panel {
+            top: auto;
+            bottom: calc(100% + 8px);
+        }
+
+        .time-picker__columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.45rem;
+        }
+
+        .time-picker__column {
+            max-height: min(180px, 32vh);
+            overflow-y: auto;
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--panel-strong) 54%, transparent);
+            padding: 0.25rem;
+            scrollbar-width: thin;
+            scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+        }
+
+        .time-picker__column::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .time-picker__column::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .time-picker__column::-webkit-scrollbar-thumb {
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--muted) 45%, transparent);
+        }
+
+        .time-picker__item {
+            width: 100%;
+            border-radius: 10px;
+            color: var(--text);
+            padding: 0.48rem 0.3rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .time-picker__item:hover {
+            background: var(--hover-bg, #f3f4f6);
+        }
+
+        .time-picker__item.active {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .time-picker__actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-top: 0.65rem;
+        }
+
+        .time-picker__action {
+            border-radius: 10px;
+            padding: 0.45rem 0.7rem;
+            color: var(--accent);
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+
+        .time-picker__confirm {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .schedule-alert {
+            margin-top: 0.75rem;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+            border-radius: 18px;
+            background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+            padding: 0.75rem 1rem;
+        }
+
+        .schedule-alert p {
+            margin: 0;
+            color: var(--danger);
+            font-size: 0.875rem;
+            font-weight: 700;
+            line-height: 1.55;
         }
 
         .account-row {
@@ -2310,6 +2511,10 @@
                                                     :disabled="isSyncingAccount(idx)">
 	                                                {{ getAccountSyncLabel(idx) }}
 	                                            </button>
+                                                <button v-if="acc.scheduleBlockedByTraffic" @click="restoreScheduleBlock(idx)" class="ghost-button compact-button"
+                                                    :disabled="isRestoringScheduleBlock(idx)">
+                                                    {{ isRestoringScheduleBlock(idx) ? '恢复中...' : '恢复定时' }}
+                                                </button>
 	                                            <button @click="openEditAccountModal(idx)" class="ghost-button compact-button">编辑</button>
 	                                            <button @click="removeAccountRow(idx)" class="danger-button compact-button">删除</button>
 	                                        </div>
@@ -2358,6 +2563,10 @@
                                             :disabled="isSyncingAccount(idx)">
 	                                        {{ getAccountSyncLabel(idx) }}
 	                                    </button>
+                                        <button v-if="acc.scheduleBlockedByTraffic" @click="restoreScheduleBlock(idx)" class="ghost-button !px-3 !py-2"
+                                            :disabled="isRestoringScheduleBlock(idx)">
+                                            {{ isRestoringScheduleBlock(idx) ? '恢复中...' : '恢复定时' }}
+                                        </button>
 	                                    <button @click="openEditAccountModal(idx)" class="ghost-button !px-3 !py-2">编辑</button>
 	                                    <button @click="removeAccountRow(idx)" class="danger-button !px-3 !py-2">删除</button>
 	                                </div>
@@ -2793,6 +3002,55 @@
                         <label class="field-label">账号可用流量（GB）</label>
                         <input v-model.number="accountDraft.maxTraffic" type="number" min="1" class="glass-input" placeholder="200">
                     </div>
+                    <div class="modal-field-full schedule-card">
+                        <div class="schedule-card__header">
+                            <div>
+                                <label class="field-label !mb-1">定时开关机</label>
+                                <p class="schedule-card__hint">支持每天按计划时间自动开机、自动停机。定时停机将沿用系统设置里的停机方式。</p>
+                            </div>
+                            <span class="switch-control">
+                                <input v-model="accountDraft.scheduleEnabled" type="checkbox">
+                                <span class="switch-slider"></span>
+                            </span>
+                        </div>
+                        <div v-if="accountDraft.scheduleEnabled" class="mt-4 grid gap-4 md:grid-cols-2">
+                            <div class="schedule-option">
+                                <div class="schedule-option__top">
+                                    <label class="field-label !mb-0">定时开机</label>
+                                    <span class="switch-control">
+                                        <input v-model="accountDraft.scheduleStartEnabled" type="checkbox">
+                                        <span class="switch-slider"></span>
+                                    </span>
+                                </div>
+                                <time-picker
+                                    v-model="accountDraft.startTime"
+                                    placeholder="请选择开机时间"
+                                    :disabled="!accountDraft.scheduleStartEnabled"
+                                />
+                            </div>
+                            <div class="schedule-option">
+                                <div class="schedule-option__top">
+                                    <label class="field-label !mb-0">定时停机</label>
+                                    <span class="switch-control">
+                                        <input v-model="accountDraft.scheduleStopEnabled" type="checkbox">
+                                        <span class="switch-slider"></span>
+                                    </span>
+                                </div>
+                                <time-picker
+                                    v-model="accountDraft.stopTime"
+                                    placeholder="请选择停机时间"
+                                    :disabled="!accountDraft.scheduleStopEnabled"
+                                />
+                            </div>
+                        </div>
+                        <div v-if="accountDraft.scheduleBlockedByTraffic" class="schedule-alert">
+                            <p>该账号下实例曾因流量阈值触发自动停机，定时开关机会暂停；阿里云自然月重置后系统会自动恢复。</p>
+                            <button v-if="accountModalMode === 'edit'" @click="restoreScheduleBlock(editingAccountIndex)" class="ghost-button compact-button"
+                                :disabled="isRestoringScheduleBlock(editingAccountIndex)">
+                                {{ isRestoringScheduleBlock(editingAccountIndex) ? '恢复中...' : '手动恢复' }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div v-if="accountDraftTestResult" class="test-result-card"
@@ -3187,9 +3445,178 @@
             `
         };
 
+        const TimePicker = {
+            name: 'TimePicker',
+            props: {
+                modelValue: {
+                    type: String,
+                    default: ''
+                },
+                placeholder: {
+                    type: String,
+                    default: '请选择时间'
+                },
+                disabled: {
+                    type: Boolean,
+                    default: false
+                }
+            },
+            emits: ['update:modelValue'],
+            setup(props, { emit }) {
+                const open = ref(false);
+                const root = ref(null);
+                const dropUp = ref(false);
+                const tempHour = ref('00');
+                const tempMinute = ref('00');
+                const instanceId = `time-${Math.random().toString(36).slice(2)}`;
+                const hours = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'));
+                const minutes = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, '0'));
+
+                const syncTemp = () => {
+                    const match = String(props.modelValue || '').match(/^(\d{2}):(\d{2})$/);
+                    tempHour.value = match ? match[1] : '00';
+                    tempMinute.value = match ? match[2] : '00';
+                };
+
+                const toggle = () => {
+                    if (props.disabled) return;
+                    if (!open.value) {
+                        syncTemp();
+                        window.dispatchEvent(new CustomEvent('app-select-opened', {
+                            detail: { id: instanceId }
+                        }));
+                        requestAnimationFrame(() => {
+                            if (!root.value) return;
+                            const rect = root.value.getBoundingClientRect();
+                            dropUp.value = (window.innerHeight - rect.bottom) < 320 && rect.top > 260;
+                        });
+                    }
+                    open.value = !open.value;
+                };
+
+                const selectHour = (hour) => {
+                    tempHour.value = hour;
+                };
+
+                const selectMinute = (minute) => {
+                    tempMinute.value = minute;
+                };
+
+                const confirm = () => {
+                    emit('update:modelValue', `${tempHour.value}:${tempMinute.value}`);
+                    open.value = false;
+                };
+
+                const setNow = () => {
+                    const now = new Date();
+                    tempHour.value = String(now.getHours()).padStart(2, '0');
+                    tempMinute.value = String(now.getMinutes()).padStart(2, '0');
+                    confirm();
+                };
+
+                const handleClickOutside = (event) => {
+                    if (root.value && !root.value.contains(event.target)) {
+                        open.value = false;
+                    }
+                };
+
+                const handleKeydown = (event) => {
+                    if (!root.value || !root.value.contains(document.activeElement)) return;
+                    if (event.key === 'Escape') {
+                        open.value = false;
+                    }
+                    if (event.key === 'Enter' && open.value) {
+                        confirm();
+                    }
+                };
+
+                const handleSelectOpened = (event) => {
+                    if (event?.detail?.id !== instanceId) {
+                        open.value = false;
+                    }
+                };
+
+                watch(() => props.modelValue, syncTemp, { immediate: true });
+
+                onMounted(() => {
+                    document.addEventListener('click', handleClickOutside);
+                    document.addEventListener('keydown', handleKeydown);
+                    window.addEventListener('app-select-opened', handleSelectOpened);
+                });
+
+                onUnmounted(() => {
+                    document.removeEventListener('click', handleClickOutside);
+                    document.removeEventListener('keydown', handleKeydown);
+                    window.removeEventListener('app-select-opened', handleSelectOpened);
+                });
+
+                return {
+                    open,
+                    dropUp,
+                    root,
+                    hours,
+                    minutes,
+                    tempHour,
+                    tempMinute,
+                    toggle,
+                    selectHour,
+                    selectMinute,
+                    confirm,
+                    setNow
+                };
+            },
+            template: `
+                <div ref="root" class="time-picker" :class="{ open, 'drop-up': dropUp }">
+                    <button type="button" class="time-picker__trigger" :disabled="disabled" @click.stop="toggle">
+                        <span class="time-picker__value" :class="{ 'time-picker__placeholder': !modelValue }">
+                            {{ modelValue || placeholder }}
+                        </span>
+                        <span class="time-picker__icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+                                <circle cx="12" cy="12" r="9"/>
+                                <path d="M12 7v5l3 2"/>
+                            </svg>
+                        </span>
+                    </button>
+
+                    <transition name="select-pop">
+                        <div v-if="open" class="time-picker__panel" @click.stop>
+                            <div class="time-picker__columns">
+                                <div class="time-picker__column">
+                                    <button
+                                        v-for="hour in hours"
+                                        :key="'h-' + hour"
+                                        type="button"
+                                        class="time-picker__item"
+                                        :class="{ active: tempHour === hour }"
+                                        @click="selectHour(hour)"
+                                    >{{ hour }}</button>
+                                </div>
+                                <div class="time-picker__column">
+                                    <button
+                                        v-for="minute in minutes"
+                                        :key="'m-' + minute"
+                                        type="button"
+                                        class="time-picker__item"
+                                        :class="{ active: tempMinute === minute }"
+                                        @click="selectMinute(minute)"
+                                    >{{ minute }}</button>
+                                </div>
+                            </div>
+                            <div class="time-picker__actions">
+                                <button type="button" class="time-picker__action" @click="setNow">此刻</button>
+                                <button type="button" class="time-picker__action time-picker__confirm" @click="confirm">确定</button>
+                            </div>
+                        </div>
+                    </transition>
+                </div>
+            `
+        };
+
         createApp({
             components: {
-                AppSelect
+                AppSelect,
+                TimePicker
             },
             setup() {
                 const aliyunRegions = [
@@ -3228,6 +3655,12 @@
                     siteType: 'international',
                     maxTraffic: 200,
                     remark: '',
+                    scheduleEnabled: false,
+                    scheduleStartEnabled: false,
+                    scheduleStopEnabled: false,
+                    startTime: '',
+                    stopTime: '',
+                    scheduleBlockedByTraffic: false,
                     usageUsed: 0,
                     usageRemaining: 200,
                     usagePercent: 0,
@@ -3340,6 +3773,7 @@
                 const refreshingInstanceIds = ref([]);
                 const accountSyncStates = ref({});
                 const accountSyncResults = ref({});
+                const scheduleRestoreStates = ref({});
                 const configBaseline = ref('');
                 const toasts = ref([]);
                 const dialogState = ref({
@@ -3535,6 +3969,11 @@
                     const account = config.value.Accounts[index];
                     if (!account) return false;
                     return !!accountSyncStates.value[getAccountKey(account, index)];
+                };
+                const isRestoringScheduleBlock = (index) => {
+                    const account = config.value.Accounts[index];
+                    if (!account) return false;
+                    return !!scheduleRestoreStates.value[getAccountKey(account, index)];
                 };
                 const getAccountSyncLabel = (index) => {
                     if (isSyncingAccount(index)) return '同步中...';
@@ -4211,6 +4650,52 @@
                     }
                 };
 
+                const restoreScheduleBlock = async (index) => {
+                    const account = config.value.Accounts[index];
+                    if (!account) return;
+
+                    if (!account.groupKey) {
+                        openAlert('账号信息不完整，请先保存账号后再恢复。', 'error');
+                        return;
+                    }
+
+                    const confirmed = await askConfirm('确定恢复该账号的定时开关机吗？如果本月流量仍然超过阈值，下一轮监控会再次触发保护并暂停定时任务。', {
+                        title: '恢复定时开关机',
+                        confirmLabel: '确认恢复'
+                    });
+                    if (!confirmed) return;
+
+                    const key = getAccountKey(account, index);
+                    scheduleRestoreStates.value = { ...scheduleRestoreStates.value, [key]: true };
+
+                    try {
+                        const res = await fetch('index.php?action=restore_schedule_block', {
+                            method: 'POST',
+                            body: JSON.stringify({ groupKey: account.groupKey })
+                        });
+                        const data = await res.json();
+
+                        if (!res.ok || !data.success) {
+                            openAlert(data.message || '恢复失败', 'error');
+                            return;
+                        }
+
+                        await fetchConfig();
+                        if (accountModalMode.value === 'edit' && editingAccountIndex.value > -1) {
+                            accountDraft.value = {
+                                ...createDefaultAccount(),
+                                ...(config.value.Accounts[editingAccountIndex.value] || {})
+                            };
+                        }
+                        openAlert(data.message || '定时开关机已恢复', 'success');
+                    } catch (error) {
+                        console.error('Restore schedule failed', error);
+                        openAlert('恢复请求失败，请稍后重试', 'error');
+                    } finally {
+                        scheduleRestoreStates.value = { ...scheduleRestoreStates.value, [key]: false };
+                    }
+                };
+
                 const openCreateAccountModal = () => {
                     accountModalMode.value = 'create';
                     editingAccountIndex.value = -1;
@@ -4245,6 +4730,20 @@
                         openAlert('请填写完整的账号信息，包括备注、AK、区域和账号流量。', 'error');
                         return false;
                     }
+                    if (draft.scheduleEnabled) {
+                        if (!draft.scheduleStartEnabled && !draft.scheduleStopEnabled) {
+                            openAlert('已开启定时开关机，请至少启用一个定时动作。', 'error');
+                            return false;
+                        }
+                        if (draft.scheduleStartEnabled && !draft.startTime) {
+                            openAlert('请填写定时开机时间。', 'error');
+                            return false;
+                        }
+                        if (draft.scheduleStopEnabled && !draft.stopTime) {
+                            openAlert('请填写定时停机时间。', 'error');
+                            return false;
+                        }
+                    }
                     return true;
                 };
 
@@ -4256,6 +4755,13 @@
                         ...createDefaultAccount(),
                         ...accountDraft.value
                     };
+
+                    if (!draft.scheduleEnabled) {
+                        draft.scheduleStartEnabled = false;
+                        draft.scheduleStopEnabled = false;
+                        draft.startTime = '';
+                        draft.stopTime = '';
+                    }
 
                     if (accountModalMode.value === 'edit' && editingAccountIndex.value > -1) {
                         nextAccounts.splice(editingAccountIndex.value, 1, draft);
@@ -4786,6 +5292,7 @@
                     accountModalMode,
                     accountSyncResults,
                     accountSyncStates,
+                    scheduleRestoreStates,
                     fetchingAllInstances,
                     syncingInstances,
                     filteredManagedInstances,
@@ -4843,6 +5350,7 @@
                     getAccountSyncButtonClass,
                     getSiteTypeLabel,
                     isSyncingAccount,
+                    isRestoringScheduleBlock,
                     isRefreshingInstance,
                     copyCredential,
                     buildCredentialCopyText,
@@ -4862,6 +5370,7 @@
                     statusText,
                     logTypeLabel,
                     syncAccount,
+                    restoreScheduleBlock,
                     toasts,
                     getRegionName,
                     toggleAdmin,

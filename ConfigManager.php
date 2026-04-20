@@ -97,15 +97,25 @@ class ConfigManager
         $stmt = $this->db->prepare("UPDATE accounts SET traffic_billing_month = ? WHERE traffic_billing_month IS NULL OR traffic_billing_month = ''");
         $stmt->execute([$currentMonth]);
 
+        $stmt = $this->db->prepare("SELECT COUNT(*) FROM accounts WHERE traffic_billing_month <> ?");
+        $stmt->execute([$currentMonth]);
+        $needsMonthlyReset = (int) $stmt->fetchColumn() > 0;
+
         // 阿里云 CDT/公网流量按自然月结算。月切换后，展示值和熔断判断都必须从当月重新开始。
         $stmt = $this->db->prepare("
             UPDATE accounts
             SET traffic_used = 0,
                 traffic_billing_month = ?,
-                updated_at = 0
+                updated_at = 0,
+                schedule_blocked_by_traffic = 0
             WHERE traffic_billing_month <> ?
         ");
         $stmt->execute([$currentMonth, $currentMonth]);
+
+        if ($needsMonthlyReset) {
+            $this->clearStoredAccountGroupScheduleBlocks();
+            $this->database->addLog('info', '检测到新的自然月，已重置账号流量并恢复定时开关机');
+        }
     }
 
     public function get($key, $default = null)
@@ -157,7 +167,22 @@ class ConfigManager
         if (!empty($raw)) {
             $decoded = json_decode($raw, true);
             if (is_array($decoded)) {
-                return $this->normalizeAccountGroups($decoded, true);
+                $groups = $this->normalizeAccountGroups($decoded, true);
+                $blockedByGroup = [];
+                foreach ($this->accountsCache as $row) {
+                    $groupKey = $row['group_key'] ?: $this->buildGroupKey($row['access_key_id'], $row['region_id']);
+                    if (!isset($blockedByGroup[$groupKey])) {
+                        $blockedByGroup[$groupKey] = false;
+                    }
+                    if (!empty($row['schedule_blocked_by_traffic'])) {
+                        $blockedByGroup[$groupKey] = true;
+                    }
+                }
+                foreach ($groups as &$group) {
+                    $group['scheduleBlockedByTraffic'] = !empty($blockedByGroup[$group['groupKey'] ?? '']);
+                }
+                unset($group);
+                return $groups;
             }
         }
 
@@ -369,8 +394,11 @@ class ConfigManager
                 instance_id,
                 max_traffic,
                 schedule_enabled,
+                schedule_start_enabled,
+                schedule_stop_enabled,
                 start_time,
                 stop_time,
+                schedule_blocked_by_traffic,
                 traffic_used,
                 traffic_billing_month,
                 instance_status,
@@ -392,7 +420,7 @@ class ConfigManager
                 memory,
                 os_name,
                 stopped_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
         $updateStmt = $this->db->prepare("
@@ -403,8 +431,11 @@ class ConfigManager
                 instance_id = ?,
                 max_traffic = ?,
                 schedule_enabled = ?,
+                schedule_start_enabled = ?,
+                schedule_stop_enabled = ?,
                 start_time = ?,
                 stop_time = ?,
+                schedule_blocked_by_traffic = ?,
                 instance_status = ?,
                 remark = ?,
                 site_type = ?,
@@ -454,9 +485,12 @@ class ConfigManager
                         $group['regionId'],
                         $instance['instanceId'],
                         $group['maxTraffic'],
-                        0,
-                        '',
-                        '',
+                        !empty($group['scheduleEnabled']) ? 1 : 0,
+                        !empty($group['scheduleStartEnabled']) ? 1 : 0,
+                        !empty($group['scheduleStopEnabled']) ? 1 : 0,
+                        $group['startTime'] ?? '',
+                        $group['stopTime'] ?? '',
+                        !empty($group['scheduleBlockedByTraffic']) ? 1 : 0,
                         $instance['status'] ?: ($existingRow['instance_status'] ?? 'Unknown'),
                         $remark,
                         $group['siteType'],
@@ -483,9 +517,12 @@ class ConfigManager
                         $group['regionId'],
                         $instance['instanceId'],
                         $group['maxTraffic'],
-                        0,
-                        '',
-                        '',
+                        !empty($group['scheduleEnabled']) ? 1 : 0,
+                        !empty($group['scheduleStartEnabled']) ? 1 : 0,
+                        !empty($group['scheduleStopEnabled']) ? 1 : 0,
+                        $group['startTime'] ?? '',
+                        $group['stopTime'] ?? '',
+                        !empty($group['scheduleBlockedByTraffic']) ? 1 : 0,
                         date('Y-m'),
                         $instance['status'] ?? 'Unknown',
                         $remark,
@@ -634,6 +671,16 @@ class ConfigManager
                 $groupKey = $this->buildGroupKey($accessKeyId, $regionId);
             }
 
+            $scheduleEnabled = !empty($group['scheduleEnabled']) || !empty($group['schedule_enabled']);
+            $startTime = trim((string) ($group['startTime'] ?? $group['start_time'] ?? ''));
+            $stopTime = trim((string) ($group['stopTime'] ?? $group['stop_time'] ?? ''));
+            $scheduleStartEnabled = array_key_exists('scheduleStartEnabled', $group) || array_key_exists('schedule_start_enabled', $group)
+                ? (!empty($group['scheduleStartEnabled']) || !empty($group['schedule_start_enabled']))
+                : ($scheduleEnabled && $startTime !== '');
+            $scheduleStopEnabled = array_key_exists('scheduleStopEnabled', $group) || array_key_exists('schedule_stop_enabled', $group)
+                ? (!empty($group['scheduleStopEnabled']) || !empty($group['schedule_stop_enabled']))
+                : ($scheduleEnabled && $stopTime !== '');
+
             $normalized[] = [
                 'groupKey' => $groupKey,
                 'AccessKeyId' => $accessKeyId,
@@ -641,7 +688,13 @@ class ConfigManager
                 'regionId' => $regionId,
                 'siteType' => $group['siteType'] ?? $this->inferSiteType($regionId),
                 'maxTraffic' => (float) ($group['maxTraffic'] ?? 200),
-                'remark' => trim((string) ($group['remark'] ?? ''))
+                'remark' => trim((string) ($group['remark'] ?? '')),
+                'scheduleEnabled' => $scheduleEnabled || $scheduleStartEnabled || $scheduleStopEnabled,
+                'scheduleStartEnabled' => $scheduleStartEnabled,
+                'scheduleStopEnabled' => $scheduleStopEnabled,
+                'startTime' => $startTime,
+                'stopTime' => $stopTime,
+                'scheduleBlockedByTraffic' => !empty($group['scheduleBlockedByTraffic']) || !empty($group['schedule_blocked_by_traffic'])
             ];
         }
 
@@ -722,7 +775,13 @@ class ConfigManager
                 'regionId' => $regionId,
                 'siteType' => $row['site_type'] ?? $this->inferSiteType($regionId),
                 'maxTraffic' => (float) ($row['max_traffic'] ?? 200),
-                'remark' => $row['remark'] ?? ''
+                'remark' => $row['remark'] ?? '',
+                'scheduleEnabled' => !empty($row['schedule_enabled']),
+                'scheduleStartEnabled' => !empty($row['schedule_start_enabled']),
+                'scheduleStopEnabled' => !empty($row['schedule_stop_enabled']),
+                'startTime' => $row['start_time'] ?? '',
+                'stopTime' => $row['stop_time'] ?? '',
+                'scheduleBlockedByTraffic' => !empty($row['schedule_blocked_by_traffic'])
             ];
         }
 
@@ -817,8 +876,11 @@ class ConfigManager
                 region_id = ?,
                 max_traffic = ?,
                 schedule_enabled = ?,
+                schedule_start_enabled = ?,
+                schedule_stop_enabled = ?,
                 start_time = ?,
                 stop_time = ?,
+                schedule_blocked_by_traffic = ?,
                 site_type = ?,
                 group_key = ?
             WHERE group_key = ?
@@ -829,9 +891,12 @@ class ConfigManager
             $this->encryptValue($group['AccessKeySecret']),
             $group['regionId'],
             $group['maxTraffic'],
-            0,
-            '',
-            '',
+            !empty($group['scheduleEnabled']) ? 1 : 0,
+            !empty($group['scheduleStartEnabled']) ? 1 : 0,
+            !empty($group['scheduleStopEnabled']) ? 1 : 0,
+            $group['startTime'] ?? '',
+            $group['stopTime'] ?? '',
+            !empty($group['scheduleBlockedByTraffic']) ? 1 : 0,
             $group['siteType'],
             $groupKey,
             $groupKey
@@ -925,6 +990,102 @@ class ConfigManager
     {
         $stmt = $this->db->prepare("UPDATE accounts SET auto_start_blocked = ? WHERE id = ?");
         return $stmt->execute([$blocked ? 1 : 0, $id]);
+    }
+
+    public function updateScheduleExecutionState($id, $type, $date)
+    {
+        $column = $type === 'start' ? 'schedule_last_start_date' : 'schedule_last_stop_date';
+        $stmt = $this->db->prepare("UPDATE accounts SET {$column} = ? WHERE id = ?");
+        return $stmt->execute([(string) $date, $id]);
+    }
+
+    public function updateScheduleBlockedByTraffic($id, $blocked)
+    {
+        $stmt = $this->db->prepare("UPDATE accounts SET schedule_blocked_by_traffic = ? WHERE id = ?");
+        $result = $stmt->execute([$blocked ? 1 : 0, $id]);
+        if ($result) {
+            $rowStmt = $this->db->prepare("SELECT access_key_id, region_id, group_key FROM accounts WHERE id = ? LIMIT 1");
+            $rowStmt->execute([$id]);
+            $row = $rowStmt->fetch();
+            if ($row) {
+                $groupKey = $row['group_key'] ?: $this->buildGroupKey($row['access_key_id'] ?? '', $row['region_id'] ?? '');
+                $this->updateStoredAccountGroupScheduleBlock($groupKey, $blocked);
+            }
+        }
+        return $result;
+    }
+
+    public function updateScheduleBlockedByTrafficForGroup($groupKey, $blocked)
+    {
+        $stmt = $this->db->prepare("UPDATE accounts SET schedule_blocked_by_traffic = ? WHERE group_key = ?");
+        $result = $stmt->execute([$blocked ? 1 : 0, (string) $groupKey]);
+        if ($result) {
+            $this->updateStoredAccountGroupScheduleBlock((string) $groupKey, $blocked);
+        }
+        return $result;
+    }
+
+    public function restoreScheduleAfterTrafficBlock($groupKey)
+    {
+        $groupKey = trim((string) $groupKey);
+        if ($groupKey === '') {
+            return false;
+        }
+
+        $result = $this->updateScheduleBlockedByTrafficForGroup($groupKey, false);
+        $this->load();
+        return $result;
+    }
+
+    private function updateStoredAccountGroupScheduleBlock($groupKey, $blocked)
+    {
+        $groupKey = trim((string) $groupKey);
+        if ($groupKey === '') {
+            return;
+        }
+
+        $raw = $this->configCache['account_groups'] ?? '';
+        $groups = json_decode((string) $raw, true);
+        if (!is_array($groups)) {
+            return;
+        }
+
+        $changed = false;
+        foreach ($groups as &$group) {
+            if (($group['groupKey'] ?? '') !== $groupKey) {
+                continue;
+            }
+            $group['scheduleBlockedByTraffic'] = (bool) $blocked;
+            $changed = true;
+        }
+        unset($group);
+
+        if ($changed) {
+            $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
+        }
+    }
+
+    private function clearStoredAccountGroupScheduleBlocks()
+    {
+        $raw = $this->configCache['account_groups'] ?? '';
+        $groups = json_decode((string) $raw, true);
+        if (!is_array($groups)) {
+            return;
+        }
+
+        $changed = false;
+        foreach ($groups as &$group) {
+            if (!empty($group['scheduleBlockedByTraffic']) || !empty($group['schedule_blocked_by_traffic'])) {
+                $group['scheduleBlockedByTraffic'] = false;
+                unset($group['schedule_blocked_by_traffic']);
+                $changed = true;
+            }
+        }
+        unset($group);
+
+        if ($changed) {
+            $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
+        }
     }
 
     public function blockCurrentlyStoppedInstances()

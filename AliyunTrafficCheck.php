@@ -343,6 +343,12 @@ class AliyunTrafficCheck
                 'remark' => $row['remark'] ?? '',
                 'siteType' => $row['siteType'] ?? 'international',
                 'groupKey' => $row['groupKey'] ?? '',
+                'scheduleEnabled' => !empty($row['scheduleEnabled']),
+                'scheduleStartEnabled' => !empty($row['scheduleStartEnabled']),
+                'scheduleStopEnabled' => !empty($row['scheduleStopEnabled']),
+                'startTime' => $row['startTime'] ?? '',
+                'stopTime' => $row['stopTime'] ?? '',
+                'scheduleBlockedByTraffic' => !empty($row['scheduleBlockedByTraffic']),
                 'usageUsed' => round((float) ($metrics['usageUsed'] ?? 0), 6),
                 'usageRemaining' => round((float) ($metrics['usageRemaining'] ?? 0), 6),
                 'usagePercent' => round((float) ($metrics['usagePercent'] ?? 0), 2),
@@ -496,6 +502,7 @@ class AliyunTrafficCheck
         foreach ($accounts as $account) {
             $accountLabel = $this->getAccountLogLabel($account);
             $logPrefix = "[{$accountLabel}]";
+            $accountGroupKey = $account['group_key'] ?: substr(sha1(($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? '')), 0, 16);
             $actions = [];
             $forceRefresh = false;
             $protectionSuspended = !empty($account['protection_suspended']);
@@ -582,6 +589,7 @@ class AliyunTrafficCheck
             $isOverThreshold = $usagePercent >= $threshold;
             $isHardLimitExceeded = $maxTraffic > 0 && $accountTraffic >= $maxTraffic;
             $requiresTrafficProtection = $isOverThreshold || $isHardLimitExceeded;
+            $scheduleBlockedByTraffic = !empty($account['schedule_blocked_by_traffic']);
 
             // 2. 流量熔断
             if ($requiresTrafficProtection) {
@@ -613,8 +621,10 @@ class AliyunTrafficCheck
                                 $actions[] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
                                 $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$accountLabel}] 当前使用率:{$usagePercent}%");
                                 $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
+                                $this->configManager->updateScheduleBlockedByTrafficForGroup($accountGroupKey, true);
                                 $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', '流量达到保护线，已自动停机。');
                                 $status = 'Stopping';
+                                $scheduleBlockedByTraffic = true;
                             } else {
                                 $actions[] = "自动停机失败";
                                 $this->db->addLog('error', "账号出口流量达到保护线，但自动停机失败 [{$accountLabel}] 当前使用率:{$usagePercent}%");
@@ -632,7 +642,55 @@ class AliyunTrafficCheck
                 }
             }
 
-            // 3. 每月自动开机：只在每月 1 号执行，且不会启动已经触发流量保护的实例。
+            // 3. 定时开关机：本月一旦触发流量保护就暂停，月初重置或手动恢复后才重新接入。
+            $scheduleEnabled = !empty($account['schedule_enabled']);
+            $scheduleStartEnabled = !empty($account['schedule_start_enabled']);
+            $scheduleStopEnabled = !empty($account['schedule_stop_enabled']);
+            $startTime = trim((string) ($account['start_time'] ?? ''));
+            $stopTime = trim((string) ($account['stop_time'] ?? ''));
+            $today = date('Y-m-d', $currentTime);
+
+            if ($scheduleEnabled && !$scheduleBlockedByTraffic && !$requiresTrafficProtection && !in_array($status, ['Starting', 'Stopping', 'Pending', 'Releasing', 'Released'], true)) {
+                if ($scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account['schedule_last_stop_date'] ?? '')) {
+                    if ($status === 'Running') {
+                        if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                            $actions[] = "定时停机";
+                            $this->db->addLog('info', "执行定时停机 [{$accountLabel}] {$stopTime}");
+                            $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
+                            $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                            $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
+                            $this->logNotificationResult($scheduleNotify, $accountLabel);
+                            $this->notifyStatusChangeIfNeeded($account, 'Running', 'Stopping', '已按计划执行定时停机。');
+                            $status = 'Stopping';
+                        } else {
+                            $apiStatusLog .= " [定时停机失败]";
+                        }
+                    } else {
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                    }
+                }
+
+                if ($scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account['schedule_last_start_date'] ?? '')) {
+                    if ($status === 'Stopped') {
+                        if ($this->safeControlInstance($account, 'start')) {
+                            $actions[] = "定时开机";
+                            $this->db->addLog('info', "执行定时开机 [{$accountLabel}] {$startTime}");
+                            $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
+                            $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                            $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
+                            $this->logNotificationResult($scheduleNotify, $accountLabel);
+                            $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
+                            $status = 'Starting';
+                        } else {
+                            $apiStatusLog .= " [定时开机失败]";
+                        }
+                    } else {
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                    }
+                }
+            }
+
+            // 4. 每月自动开机：只在每月 1 号执行，且不会启动已经触发流量保护的实例。
             $autoStartBlocked = !empty($account['auto_start_blocked']);
             if ($monthlyAutoStart && !$autoStartBlocked && !$requiresTrafficProtection && date('j', $currentTime) === '1') {
                 $lastMonthlyStart = (int) ($account['last_keep_alive_at'] ?? 0);
@@ -650,7 +708,7 @@ class AliyunTrafficCheck
                 }
             }
 
-            // 4. 保活逻辑
+            // 5. 保活逻辑
             if ($keepAlive && !$autoStartBlocked && !$requiresTrafficProtection) {
                 if ($status === 'Stopped') {
                     if ($this->safeControlInstance($account, 'start')) {
@@ -1149,6 +1207,39 @@ class AliyunTrafficCheck
         ];
     }
 
+    public function restoreScheduleAfterTrafficBlock($groupKey)
+    {
+        if ($this->initError) {
+            throw new Exception($this->initError);
+        }
+
+        $groupKey = trim((string) $groupKey);
+        if ($groupKey === '') {
+            throw new Exception('缺少账号组标识');
+        }
+
+        $groups = $this->configManager->getAccountGroups();
+        $targetGroup = null;
+        foreach ($groups as $group) {
+            if (($group['groupKey'] ?? '') === $groupKey) {
+                $targetGroup = $group;
+                break;
+            }
+        }
+
+        if (!$targetGroup) {
+            throw new Exception('账号组不存在，请刷新页面后重试');
+        }
+
+        $this->configManager->restoreScheduleAfterTrafficBlock($groupKey);
+        $this->db->addLog('info', "已手动恢复定时开关机 [{$targetGroup['remark']}] {$targetGroup['regionId']}");
+
+        return [
+            'success' => true,
+            'message' => '定时开关机已恢复。请确认本月流量未继续超过阈值，否则下一轮监控仍会触发保护。'
+        ];
+    }
+
     private function summarizeTrafficIssueForAccounts(array $accounts)
     {
         if (empty($accounts)) {
@@ -1331,6 +1422,17 @@ class AliyunTrafficCheck
             return false;
         }
         return date('Y-m', (int) $timestamp) === date('Y-m', (int) $currentTime);
+    }
+
+    private function shouldRunScheduleAt($currentTime, $targetTime, $lastRunDate)
+    {
+        $targetTime = trim((string) $targetTime);
+        if ($targetTime === '' || !preg_match('/^\d{2}:\d{2}$/', $targetTime)) {
+            return false;
+        }
+
+        $today = date('Y-m-d', $currentTime);
+        return date('H:i', $currentTime) === $targetTime && (string) $lastRunDate !== $today;
     }
 
     private function isCredentialInvalidTrafficStatus($status)

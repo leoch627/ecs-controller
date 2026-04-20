@@ -17,9 +17,6 @@ class NotificationService
      */
     public function notifySchedule($actionType, $account, $description = "")
     {
-        if (($this->config['enable_schedule_email'] ?? '0') !== '1')
-            return true;
-
         $title = "定时任务: " . $actionType;
         $maskedKey = substr($account['access_key_id'], 0, 7) . '***';
         $traffic = isset($account['traffic_used']) ? $this->formatTraffic((float) $account['traffic_used']) : '暂无';

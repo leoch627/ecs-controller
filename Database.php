@@ -209,6 +209,11 @@ class Database
         $this->ensureColumn('accounts', 'updated_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'last_keep_alive_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'auto_start_blocked', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'schedule_start_enabled', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'schedule_stop_enabled', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'schedule_last_start_date', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'schedule_last_stop_date', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'schedule_blocked_by_traffic', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'remark', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'site_type', "TEXT DEFAULT 'international'");
         $this->ensureColumn('accounts', 'group_key', "TEXT DEFAULT ''");
