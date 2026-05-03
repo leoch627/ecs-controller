@@ -14,12 +14,17 @@ fi
 crond -b -l 8
 echo "Cron daemon started."
 
-# 3. 启动 PHP-FPM (后台运行)
+# 3. 启动 Telegram 控制轮询 (后台运行)
+# 如果没有配置 Telegram，进程会保持低频等待；配置后按钮控制可秒级响应。
+su -s /bin/sh www-data -c "php /var/www/html/telegram_worker.php" >/dev/null 2>&1 &
+echo "Telegram control worker started."
+
+# 4. 启动 PHP-FPM (后台运行)
 # -D 表示 Daemonize (守护进程模式)
 php-fpm -D
 echo "PHP-FPM started."
 
-# 4. 启动 Nginx (前台运行)
+# 5. 启动 Nginx (前台运行)
 # 保持 Nginx 在前台运行，防止容器退出
 echo "Nginx started."
 nginx -g 'daemon off;'

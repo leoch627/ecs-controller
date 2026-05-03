@@ -6,6 +6,7 @@ require_once 'ConfigManager.php';
 require_once 'AliyunService.php';
 require_once 'NotificationService.php';
 require_once 'DdnsService.php';
+require_once 'TelegramControlService.php';
 
 use AlibabaCloud\Client\Exception\ClientException;
 use AlibabaCloud\Client\Exception\ServerException;
@@ -141,9 +142,24 @@ class AliyunTrafficCheck
         return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
     }
 
-    private function resolveSecretFromDatabase($accessKeyId, $regionId)
+    private function resolveSecretFromDatabase($accessKeyId, $regionId, $groupKey = '')
     {
         $pdo = $this->db->getPdo();
+        $groupKey = trim((string) $groupKey);
+
+        if ($groupKey !== '') {
+            $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE group_key = ? LIMIT 1");
+            $stmt->execute([$groupKey]);
+            $row = $stmt->fetch();
+
+            if ($row && !empty($row['access_key_secret'])) {
+                $secret = $this->configManager->decryptAccountSecret($row['access_key_secret']);
+                if (!empty($secret)) {
+                    return $secret;
+                }
+            }
+        }
+
         $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE access_key_id = ? AND region_id = ? LIMIT 1");
         $stmt->execute([$accessKeyId, $regionId]);
         $row = $stmt->fetch();
@@ -157,8 +173,10 @@ class AliyunTrafficCheck
 
         foreach ($this->configManager->getAccountGroups() as $group) {
             if (
-                ($group['AccessKeyId'] ?? '') === $accessKeyId
-                && ($group['regionId'] ?? '') === $regionId
+                (
+                    ($groupKey !== '' && ($group['groupKey'] ?? '') === $groupKey)
+                    || (($group['AccessKeyId'] ?? '') === $accessKeyId && ($group['regionId'] ?? '') === $regionId)
+                )
                 && !empty($group['AccessKeySecret'])
                 && $group['AccessKeySecret'] !== '********'
             ) {
@@ -280,7 +298,9 @@ class AliyunTrafficCheck
                     'proxy_ip' => $settings['notify_tg_proxy_ip'] ?? '',
                     'proxy_port' => $settings['notify_tg_proxy_port'] ?? '',
                     'proxy_user' => $settings['notify_tg_proxy_user'] ?? '',
-                    'proxy_pass' => !empty($settings['notify_tg_proxy_pass']) ? '********' : ''
+                    'proxy_pass' => !empty($settings['notify_tg_proxy_pass']) ? '********' : '',
+                    'allowed_user_ids' => $settings['notify_tg_allowed_user_ids'] ?? '',
+                    'confirm_ttl' => (int) ($settings['notify_tg_confirm_ttl'] ?? 60)
                 ],
                 'webhook' => [
                     'enabled' => ($settings['notify_wh_enabled'] ?? '0') === '1',
@@ -320,7 +340,9 @@ class AliyunTrafficCheck
                 'usageRemaining' => (float) ($row['maxTraffic'] ?? 0),
                 'usagePercent' => 0,
                 'instanceCount' => 0,
-                'lastUpdated' => 0
+                'lastUpdated' => 0,
+                'trafficStatus' => 'ok',
+                'trafficMessage' => ''
             ];
             $config['Accounts'][] = [
                 'AccessKeyId' => $row['AccessKeyId'],
@@ -331,11 +353,19 @@ class AliyunTrafficCheck
                 'remark' => $row['remark'] ?? '',
                 'siteType' => $row['siteType'] ?? 'international',
                 'groupKey' => $row['groupKey'] ?? '',
+                'scheduleEnabled' => !empty($row['scheduleEnabled']),
+                'scheduleStartEnabled' => !empty($row['scheduleStartEnabled']),
+                'scheduleStopEnabled' => !empty($row['scheduleStopEnabled']),
+                'startTime' => $row['startTime'] ?? '',
+                'stopTime' => $row['stopTime'] ?? '',
+                'scheduleBlockedByTraffic' => !empty($row['scheduleBlockedByTraffic']),
                 'usageUsed' => round((float) ($metrics['usageUsed'] ?? 0), 6),
                 'usageRemaining' => round((float) ($metrics['usageRemaining'] ?? 0), 6),
                 'usagePercent' => round((float) ($metrics['usagePercent'] ?? 0), 2),
                 'instanceCount' => (int) ($metrics['instanceCount'] ?? 0),
                 'usageLastUpdated' => !empty($metrics['lastUpdated']) ? date('Y-m-d H:i:s', (int) $metrics['lastUpdated']) : '',
+                'trafficStatus' => $metrics['trafficStatus'] ?? 'ok',
+                'trafficMessage' => $metrics['trafficMessage'] ?? '',
                 'billing' => $billingMetrics[$row['groupKey']] ?? [
                     'enabled' => ($settings['enable_billing'] ?? '0') === '1',
                     'monthly_cost' => null,
@@ -480,8 +510,12 @@ class AliyunTrafficCheck
         foreach ($accounts as $account) {
             $accountLabel = $this->getAccountLogLabel($account);
             $logPrefix = "[{$accountLabel}]";
+            $accountGroupKey = $account['group_key'] ?: substr(sha1(($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? '')), 0, 16);
             $actions = [];
             $forceRefresh = false;
+            $protectionSuspended = !empty($account['protection_suspended']);
+            $protectionSuspendReason = trim((string) ($account['protection_suspend_reason'] ?? ''));
+            $protectionSuspendNotifiedAt = (int) ($account['protection_suspend_notified_at'] ?? 0);
 
             // 1. 自适应心跳
             $lastUpdate = $account['updated_at'] ?? 0;
@@ -498,7 +532,7 @@ class AliyunTrafficCheck
             $newUpdateTime = $currentTime;
 
             if ($shouldCheckApi) {
-                $newTraffic = $this->safeGetTraffic($account);
+                $trafficResult = $this->safeGetTraffic($account);
                 $status = $this->safeGetInstanceStatus($account);
 
                 if ($status === 'Unknown') {
@@ -506,12 +540,34 @@ class AliyunTrafficCheck
                     $status = $this->safeGetInstanceStatus($account);
                 }
 
-                if ($newTraffic < 0) {
+                $metadata = [
+                    'traffic_api_status' => $trafficResult['status'] ?? 'ok',
+                    'traffic_api_message' => $trafficResult['message'] ?? ''
+                ];
+                $authInvalid = $this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '');
+
+                if ($authInvalid) {
+                    $metadata['protection_suspended'] = 1;
+                    $metadata['protection_suspend_reason'] = 'credential_invalid';
+                    $metadata['protection_suspend_notified_at'] = $protectionSuspendNotifiedAt;
+                    $protectionSuspended = true;
+                    $protectionSuspendReason = 'credential_invalid';
+                } elseif ($protectionSuspended && $protectionSuspendReason === 'credential_invalid') {
+                    $metadata['protection_suspended'] = 0;
+                    $metadata['protection_suspend_reason'] = '';
+                    $metadata['protection_suspend_notified_at'] = 0;
+                    $protectionSuspended = false;
+                    $protectionSuspendReason = '';
+                    $protectionSuspendNotifiedAt = 0;
+                    $this->db->addLog('info', "账号鉴权已恢复，自动停机保护已重新启用 [{$accountLabel}]");
+                }
+
+                if (empty($trafficResult['success'])) {
                     $traffic = $account['traffic_used'];
                     $apiStatusLog = "流量接口异常";
                     $newUpdateTime = $lastUpdate;
                 } else {
-                    $traffic = $newTraffic;
+                    $traffic = (float) ($trafficResult['value'] ?? 0);
                     $apiStatusLog = "已更新";
 
                     $this->db->addHourlyStat($account['id'], $traffic);
@@ -526,7 +582,7 @@ class AliyunTrafficCheck
                 }
 
                 $this->notifyStatusChangeIfNeeded($account, $cachedStatus, $status, '系统同步检测到实例状态变化。');
-                $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $newUpdateTime);
+                $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $newUpdateTime, $metadata);
             } else {
                 $traffic = $account['traffic_used'];
                 $status = $account['instance_status'];
@@ -541,26 +597,46 @@ class AliyunTrafficCheck
             $isOverThreshold = $usagePercent >= $threshold;
             $isHardLimitExceeded = $maxTraffic > 0 && $accountTraffic >= $maxTraffic;
             $requiresTrafficProtection = $isOverThreshold || $isHardLimitExceeded;
+            $scheduleBlockedByTraffic = !empty($account['schedule_blocked_by_traffic']);
 
             // 2. 流量熔断
             if ($requiresTrafficProtection) {
                 $trafficDesc .= $isHardLimitExceeded ? "[已超出上限]" : "[接近上限]";
 
                 if ($thresholdAction === 'stop_and_notify') {
-                    $canAttemptStop = !in_array($status, ['Stopped', 'Stopping', 'Released'], true);
-
-                    // 达到账号流量上限后必须立即保护，不再等待下一次接口刷新窗口。
-                    if ($canAttemptStop) {
-                        if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
-                            $previousStatus = $status;
-                            $actions[] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
-                            $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$accountLabel}] 当前使用率:{$usagePercent}%");
-                            $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
-                            $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', '流量达到保护线，已自动停机。');
-                            $status = 'Stopping';
+                    if ($protectionSuspended && $protectionSuspendReason === 'credential_invalid') {
+                        if ($protectionSuspendNotifiedAt <= 0) {
+                            $actions[] = "账号密钥失效，已暂停自动停机";
+                            $notifyResult = $this->notificationService->notifyCredentialInvalid($accountLabel, $accountTraffic, $usagePercent, $threshold);
+                            $this->logNotificationResult($notifyResult, $accountLabel);
+                            $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                            $protectionSuspendNotifiedAt = $currentTime;
+                            $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $lastUpdate, [
+                                'protection_suspended' => 1,
+                                'protection_suspend_reason' => 'credential_invalid',
+                                'protection_suspend_notified_at' => $protectionSuspendNotifiedAt
+                            ]);
                         } else {
-                            $actions[] = "自动停机失败";
-                            $this->db->addLog('error', "账号出口流量达到保护线，但自动停机失败 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                            $apiStatusLog .= " [鉴权失效,已暂停自动停机]";
+                        }
+                    } else {
+                        $canAttemptStop = !in_array($status, ['Stopped', 'Stopping', 'Released'], true);
+
+                        // 达到账号流量上限后必须立即保护，不再等待下一次接口刷新窗口。
+                        if ($canAttemptStop) {
+                            if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                                $previousStatus = $status;
+                                $actions[] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
+                                $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                                $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
+                                $this->configManager->updateScheduleBlockedByTrafficForGroup($accountGroupKey, true);
+                                $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', '流量达到保护线，已自动停机。');
+                                $status = 'Stopping';
+                                $scheduleBlockedByTraffic = true;
+                            } else {
+                                $actions[] = "自动停机失败";
+                                $this->db->addLog('error', "账号出口流量达到保护线，但自动停机失败 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                            }
                         }
                     }
                 } elseif ($shouldCheckApi) {
@@ -568,13 +644,61 @@ class AliyunTrafficCheck
                     $this->db->addLog('warning', "账号出口流量超限触发提醒 [{$accountLabel}] 当前使用率:{$usagePercent}%");
                 }
 
-                if (!empty($actions)) {
+                if (!empty($actions) && !($protectionSuspended && $protectionSuspendReason === 'credential_invalid')) {
                     $mailRes = $this->notificationService->sendTrafficWarning($accountLabel, $accountTraffic, $usagePercent, implode(',', $actions), $threshold);
                     $this->logNotificationResult($mailRes, $accountLabel);
                 }
             }
 
-            // 3. 每月自动开机：只在每月 1 号执行，且不会启动已经触发流量保护的实例。
+            // 3. 定时开关机：本月一旦触发流量保护就暂停，月初重置或手动恢复后才重新接入。
+            $scheduleEnabled = !empty($account['schedule_enabled']);
+            $scheduleStartEnabled = !empty($account['schedule_start_enabled']);
+            $scheduleStopEnabled = !empty($account['schedule_stop_enabled']);
+            $startTime = trim((string) ($account['start_time'] ?? ''));
+            $stopTime = trim((string) ($account['stop_time'] ?? ''));
+            $today = date('Y-m-d', $currentTime);
+
+            if ($scheduleEnabled && !$scheduleBlockedByTraffic && !$requiresTrafficProtection && !in_array($status, ['Starting', 'Stopping', 'Pending', 'Releasing', 'Released'], true)) {
+                if ($scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account['schedule_last_stop_date'] ?? '')) {
+                    if ($status === 'Running') {
+                        if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                            $actions[] = "定时停机";
+                            $this->db->addLog('info', "执行定时停机 [{$accountLabel}] {$stopTime}");
+                            $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
+                            $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                            $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
+                            $this->logNotificationResult($scheduleNotify, $accountLabel);
+                            $this->notifyStatusChangeIfNeeded($account, 'Running', 'Stopping', '已按计划执行定时停机。');
+                            $status = 'Stopping';
+                        } else {
+                            $apiStatusLog .= " [定时停机失败]";
+                        }
+                    } else {
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                    }
+                }
+
+                if ($scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account['schedule_last_start_date'] ?? '')) {
+                    if ($status === 'Stopped') {
+                        if ($this->safeControlInstance($account, 'start')) {
+                            $actions[] = "定时开机";
+                            $this->db->addLog('info', "执行定时开机 [{$accountLabel}] {$startTime}");
+                            $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
+                            $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                            $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
+                            $this->logNotificationResult($scheduleNotify, $accountLabel);
+                            $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
+                            $status = 'Starting';
+                        } else {
+                            $apiStatusLog .= " [定时开机失败]";
+                        }
+                    } else {
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                    }
+                }
+            }
+
+            // 4. 每月自动开机：只在每月 1 号执行，且不会启动已经触发流量保护的实例。
             $autoStartBlocked = !empty($account['auto_start_blocked']);
             if ($monthlyAutoStart && !$autoStartBlocked && !$requiresTrafficProtection && date('j', $currentTime) === '1') {
                 $lastMonthlyStart = (int) ($account['last_keep_alive_at'] ?? 0);
@@ -592,7 +716,7 @@ class AliyunTrafficCheck
                 }
             }
 
-            // 4. 保活逻辑
+            // 5. 保活逻辑
             if ($keepAlive && !$autoStartBlocked && !$requiresTrafficProtection) {
                 if ($status === 'Stopped') {
                     if ($this->safeControlInstance($account, 'start')) {
@@ -634,6 +758,16 @@ class AliyunTrafficCheck
         }
 
         return implode(PHP_EOL, $logs);
+    }
+
+    private function processTelegramControl()
+    {
+        try {
+            $service = new TelegramControlService($this->db, $this->configManager, $this);
+            $service->processUpdates();
+        } catch (\Exception $e) {
+            $this->db->addLog('error', 'Telegram 控制处理失败: ' . strip_tags($e->getMessage()));
+        }
     }
 
     public function getStatusForFrontend($includeSensitive = false)
@@ -684,18 +818,31 @@ class AliyunTrafficCheck
             return false;
 
         $currentTime = time();
-        $traffic = $this->safeGetTraffic($targetAccount);
+        $trafficResult = $this->safeGetTraffic($targetAccount);
         $status = $this->safeGetInstanceStatus($targetAccount);
+        $metadata = [
+            'traffic_api_status' => $trafficResult['status'] ?? 'ok',
+            'traffic_api_message' => $trafficResult['message'] ?? ''
+        ];
+        if ($this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '')) {
+            $metadata['protection_suspended'] = 1;
+            $metadata['protection_suspend_reason'] = 'credential_invalid';
+        } else {
+            $metadata['protection_suspended'] = 0;
+            $metadata['protection_suspend_reason'] = '';
+            $metadata['protection_suspend_notified_at'] = 0;
+        }
 
-        if ($traffic < 0) {
+        if (empty($trafficResult['success'])) {
             $traffic = $targetAccount['traffic_used'];
         } else {
+            $traffic = (float) ($trafficResult['value'] ?? 0);
             $this->db->addHourlyStat($targetAccount['id'], $traffic);
             $this->db->addDailyStat($targetAccount['id'], $traffic);
         }
 
         $this->notifyStatusChangeIfNeeded($targetAccount, $targetAccount['instance_status'] ?? 'Unknown', $status, '手动同步检测到实例状态变化。');
-        $this->configManager->updateAccountStatus($id, $traffic, $status, $currentTime);
+        $this->configManager->updateAccountStatus($id, $traffic, $status, $currentTime, $metadata);
 
         // 刷新账单数据：仅在启用费用监控 且 无有效缓存时调用 费用中心 接口
         $billingError = null;
@@ -738,12 +885,18 @@ class AliyunTrafficCheck
             }
         }
 
+        $response = [
+            'success' => true,
+            'traffic_status' => $trafficResult['status'] ?? 'ok',
+            'traffic_message' => $trafficResult['message'] ?? ''
+        ];
+
         if ($billingError) {
             $this->db->addLog('warning', "账单刷新异常 [{$this->getAccountLogLabel($targetAccount)}]: {$billingError}");
-            return ['success' => true, 'billing_error' => $billingError];
+            $response['billing_error'] = $billingError;
         }
 
-        return true;
+        return $response;
     }
 
     public function fetchInstances($accessKeyId, $accessKeySecret, $regionId = '')
@@ -790,7 +943,7 @@ class AliyunTrafficCheck
         }
 
         if ($accessKeySecret === '********') {
-            $accessKeySecret = $this->resolveSecretFromDatabase($accessKeyId, $regionId);
+            $accessKeySecret = $this->resolveSecretFromDatabase($accessKeyId, $regionId, $account['groupKey'] ?? '');
         }
 
         try {
@@ -843,6 +996,8 @@ class AliyunTrafficCheck
                 'success' => true,
                 'message' => $message,
                 'monitorWarning' => $monitorWarning,
+                'monitorStatus' => $monitorWarning !== '' ? 'warning' : ($monitorChecked ? 'ok' : 'skipped'),
+                'monitorMessage' => $monitorWarning !== '' ? $monitorWarning : ($monitorChecked ? '云监控接口已接通，可获取实例流量。' : '当前区域暂无实例，未执行云监控流量探测'),
                 'usageUsed' => $trafficUsed,
                 'usageRemaining' => $trafficRemaining,
                 'usagePercent' => $trafficPercent,
@@ -1045,14 +1200,91 @@ class AliyunTrafficCheck
         }
 
         $this->configManager->load();
+        $syncedAccounts = array_values(array_filter($this->configManager->getAccounts(), function ($account) use ($groupKey) {
+            $accountGroupKey = $account['group_key'] ?: substr(sha1($account['access_key_id'] . '|' . $account['region_id']), 0, 16);
+            return $accountGroupKey === $groupKey && !empty($account['instance_id']);
+        }));
         $this->reconcileDdnsAfterAccountSync($accountsBeforeSync, $this->configManager->getAccounts(), '账号同步');
         $this->db->addLog('info', "账号同步完成 [{$targetGroup['remark']}] {$targetGroup['regionId']} 实例 {$instanceCount} 台");
 
+        $trafficIssue = $this->summarizeTrafficIssueForAccounts($syncedAccounts);
+        $message = "已同步 {$instanceCount} 台实例，流量和消费情况已刷新";
+        if ($trafficIssue !== '') {
+            $message .= '；' . $trafficIssue;
+        }
+
         return [
             'success' => true,
-            'message' => "已同步 {$instanceCount} 台实例，流量和消费情况已刷新",
-            'instanceCount' => $instanceCount
+            'message' => $message,
+            'instanceCount' => $instanceCount,
+            'trafficIssue' => $trafficIssue
         ];
+    }
+
+    public function restoreScheduleAfterTrafficBlock($groupKey)
+    {
+        if ($this->initError) {
+            throw new Exception($this->initError);
+        }
+
+        $groupKey = trim((string) $groupKey);
+        if ($groupKey === '') {
+            throw new Exception('缺少账号组标识');
+        }
+
+        $groups = $this->configManager->getAccountGroups();
+        $targetGroup = null;
+        foreach ($groups as $group) {
+            if (($group['groupKey'] ?? '') === $groupKey) {
+                $targetGroup = $group;
+                break;
+            }
+        }
+
+        if (!$targetGroup) {
+            throw new Exception('账号组不存在，请刷新页面后重试');
+        }
+
+        $this->configManager->restoreScheduleAfterTrafficBlock($groupKey);
+        $this->db->addLog('info', "已手动恢复定时开关机 [{$targetGroup['remark']}] {$targetGroup['regionId']}");
+
+        return [
+            'success' => true,
+            'message' => '定时开关机已恢复。请确认本月流量未继续超过阈值，否则下一轮监控仍会触发保护。'
+        ];
+    }
+
+    private function summarizeTrafficIssueForAccounts(array $accounts)
+    {
+        if (empty($accounts)) {
+            return '';
+        }
+
+        $statuses = [];
+        foreach ($accounts as $account) {
+            $status = trim((string) ($account['traffic_api_status'] ?? 'ok'));
+            if ($status !== '' && $status !== 'ok') {
+                $statuses[$status] = true;
+            }
+        }
+
+        if (empty($statuses)) {
+            return '';
+        }
+
+        if (isset($statuses['permission_denied'])) {
+            return '部分实例缺少云监控权限，请补充 AliyunCloudMonitorMetricDataReadOnlyAccess';
+        }
+
+        if (isset($statuses['auth_error'])) {
+            return '部分实例云监控鉴权失败，请检查 AK 权限配置';
+        }
+
+        if (isset($statuses['timeout'])) {
+            return '部分实例云监控请求超时，请稍后重试';
+        }
+
+        return '部分实例流量同步失败，请稍后重试';
     }
 
     public function getEcsCreateTask($taskId)
@@ -1206,24 +1438,94 @@ class AliyunTrafficCheck
         return date('Y-m', (int) $timestamp) === date('Y-m', (int) $currentTime);
     }
 
+    private function shouldRunScheduleAt($currentTime, $targetTime, $lastRunDate)
+    {
+        $targetTime = trim((string) $targetTime);
+        if ($targetTime === '' || !preg_match('/^\d{2}:\d{2}$/', $targetTime)) {
+            return false;
+        }
+
+        $today = date('Y-m-d', $currentTime);
+        return date('H:i', $currentTime) === $targetTime && (string) $lastRunDate !== $today;
+    }
+
+    private function isCredentialInvalidTrafficStatus($status)
+    {
+        return trim((string) $status) === 'auth_error';
+    }
+
+    private function isCredentialInvalidError($code, $message = '')
+    {
+        $normalizedCode = strtolower(trim((string) $code));
+        $normalizedMessage = strtolower(trim((string) $message));
+        if ($normalizedCode === '') {
+            return false;
+        }
+
+        $credentialErrorCodes = [
+            'invalidaccesskeyid.notfound',
+            'invalidaccesskeyid',
+            'signaturedoesnotmatch',
+            'incompletesignature',
+            'forbidden.accesskeydisabled',
+            'invalidsecuritytoken.expired',
+            'invalidsecuritytoken.malformed',
+            'missingsecuritytoken'
+        ];
+
+        if (in_array($normalizedCode, $credentialErrorCodes, true)) {
+            return true;
+        }
+
+        if ($normalizedMessage === '') {
+            return false;
+        }
+
+        return strpos($normalizedMessage, 'access key is not found') !== false
+            || strpos($normalizedMessage, 'access key id does not exist') !== false
+            || strpos($normalizedMessage, 'signature does not match') !== false
+            || strpos($normalizedMessage, 'incomplete signature') !== false
+            || strpos($normalizedMessage, 'accesskeydisabled') !== false;
+    }
+
     private function safeGetTraffic($account)
     {
         try {
-            return $this->getMeteredOutboundTraffic($account);
+            return [
+                'success' => true,
+                'value' => $this->getMeteredOutboundTraffic($account),
+                'status' => 'ok',
+                'message' => ''
+            ];
         } catch (ClientException $e) {
-            $code = $e->getErrorCode();
+            $code = trim((string) $e->getErrorCode());
+            $message = '缺少云监控权限';
+            $status = 'permission_denied';
+            if ($this->isCredentialInvalidError($code, $e->getMessage())) {
+                $message = '账号 AK 已失效';
+                $status = 'auth_error';
+            } elseif ($code !== '' && !in_array($code, ['403', 'NoPermission'], true)) {
+                $message = '云监控鉴权失败';
+                $status = 'auth_error';
+            }
             $this->db->addLog('error', "公网出口流量查询配置错误 [{$this->getAccountLogLabel($account)}]: " . ($code ?: "鉴权失败") . "，请确认AK拥有云监控流量查询权限");
-            return -1;
+            return ['success' => false, 'value' => null, 'status' => $status, 'message' => $message];
         } catch (ServerException $e) {
+            $code = trim((string) $e->getErrorCode());
+            if ($this->isCredentialInvalidError($code, $e->getErrorMessage())) {
+                $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: {$code} - " . $e->getErrorMessage());
+                return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
+            }
             $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
-            return -1;
+            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => '云监控接口异常'];
         } catch (\Exception $e) {
             if (strpos($e->getMessage(), 'cURL error') !== false) {
                 $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: 网络连接超时");
-            } else {
-                $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+                return ['success' => false, 'value' => null, 'status' => 'timeout', 'message' => '云监控请求超时'];
             }
-            return -1;
+
+            $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => '流量同步失败'];
         }
     }
 
@@ -1490,7 +1792,7 @@ class AliyunTrafficCheck
         return $metrics;
     }
 
-    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging')
+    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true)
     {
         if ($this->initError)
             return false;
@@ -1506,7 +1808,7 @@ class AliyunTrafficCheck
                 $newStatus = $action === 'stop' ? 'Stopping' : 'Starting';
                 $this->configManager->updateAccountStatus($accountId, $targetAccount['traffic_used'], $newStatus, time());
                 $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
-                if ($action === 'start') {
+                if ($action === 'start' && $waitForSync) {
                     sleep(8);
                     $this->configManager->syncAccountGroups(true);
                     $this->configManager->load();
@@ -1620,26 +1922,8 @@ class AliyunTrafficCheck
 
             try {
                 if ($status === 'Stopped') {
-                    if (($account['public_ip_mode'] ?? '') === 'eip' && !empty($account['eip_managed'])) {
-                        try {
-                            if ($this->aliyunService->releaseManagedEip($account)) {
-                                $this->db->addLog('info', "托管 EIP 已随实例释放 [{$accountLabel}] {$account['eip_address']}");
-                                $this->configManager->updateAccountNetworkMetadata($account['id'], [
-                                    'public_ip' => '',
-                                    'public_ip_mode' => 'eip',
-                                    'eip_allocation_id' => '',
-                                    'eip_address' => '',
-                                    'eip_managed' => 0,
-                                    'internet_max_bandwidth_out' => $account['internet_max_bandwidth_out'] ?? 0
-                                ]);
-                                $account['eip_allocation_id'] = '';
-                                $account['eip_address'] = '';
-                                $account['eip_managed'] = 0;
-                            }
-                        } catch (\Exception $e) {
-                            $this->db->addLog('warning', "托管 EIP 释放失败，将于下一轮重试 [{$accountLabel}]: " . strip_tags($e->getMessage()));
-                            continue;
-                        }
+                    if (!$this->releaseManagedEipForPendingAccount($account, $accountLabel)) {
+                        continue;
                     }
                     $result = $this->aliyunService->deleteInstance($account, false);
                     if ($result) {
@@ -1656,9 +1940,17 @@ class AliyunTrafficCheck
                         $this->configManager->physicallyDeleteAccount($account['id']);
                         $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '异步释放后同步');
                     }
-                } elseif ($status === 'NotFound' || $status === 'Unknown') {
+                } elseif ($status === 'NotFound') {
+                    if (!$this->releaseManagedEipForPendingAccount($account, $accountLabel)) {
+                        continue;
+                    }
                     $this->db->addLog('warning', "待释放实例云端已灭迹，自动擦除本地账本 [{$accountLabel}]");
+                    $accountsBeforeDelete = $this->configManager->getAccounts();
+                    $this->deleteDdnsForAccount($account, $accountsBeforeDelete, '实例已灭迹后清理');
                     $this->configManager->physicallyDeleteAccount($account['id']);
+                    $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '实例灭迹后同步');
+                } elseif ($status === 'Unknown') {
+                    $this->db->addLog('warning', "后台异步释放引擎暂时无法确认实例状态，将于下一轮重试 [{$accountLabel}]");
                 } elseif (!in_array($status, ['Stopping'])) {
                     $this->db->addLog('info', "后台异步释放引擎：向活跃实例下发强制离线指令 [{$accountLabel}]");
                     // 仅调用 stop 并允许返回，不产生同步堵塞死循环
@@ -1668,6 +1960,35 @@ class AliyunTrafficCheck
                 // 如果 DeleteInstance 等遇到暂时性 API 禁止，让它下一分钟随 Cron 重新再轮询一次，不需要人工介入
                 $this->db->addLog('error', "后台异步释放行动异常，将于下一分钟轮询重试 [{$accountLabel}]: " . $e->getMessage());
             }
+        }
+    }
+
+    private function releaseManagedEipForPendingAccount(array &$account, $accountLabel)
+    {
+        if (($account['public_ip_mode'] ?? '') !== 'eip' || empty($account['eip_managed'])) {
+            return true;
+        }
+
+        try {
+            if ($this->aliyunService->releaseManagedEip($account)) {
+                $this->db->addLog('info', "托管 EIP 已释放 [{$accountLabel}] " . ($account['eip_address'] ?? ''));
+                $this->configManager->updateAccountNetworkMetadata($account['id'], [
+                    'public_ip' => '',
+                    'public_ip_mode' => 'eip',
+                    'eip_allocation_id' => '',
+                    'eip_address' => '',
+                    'eip_managed' => 0,
+                    'internet_max_bandwidth_out' => $account['internet_max_bandwidth_out'] ?? 0
+                ]);
+                $account['public_ip'] = '';
+                $account['eip_allocation_id'] = '';
+                $account['eip_address'] = '';
+                $account['eip_managed'] = 0;
+            }
+            return true;
+        } catch (\Exception $e) {
+            $this->db->addLog('warning', "托管 EIP 释放失败，将于下一轮重试 [{$accountLabel}]: " . strip_tags($e->getMessage()));
+            return false;
         }
     }
 
@@ -1871,23 +2192,40 @@ class AliyunTrafficCheck
         $lastUpdate = (int) ($account['updated_at'] ?? 0);
         $cachedStatus = $account['instance_status'] ?? 'Unknown';
         $newUpdateTime = $currentTime;
+        $trafficApiStatus = $account['traffic_api_status'] ?? 'ok';
+        $trafficApiMessage = $account['traffic_api_message'] ?? '';
 
         $isTransientState = in_array($cachedStatus, ['Starting', 'Stopping', 'Pending', 'Unknown'], true);
         $checkInterval = $isTransientState ? 60 : $userInterval;
 
         if ($forceRefresh || ($currentTime - $lastUpdate) > $checkInterval) {
-            $newTraffic = $this->safeGetTraffic($account);
+            $trafficResult = $this->safeGetTraffic($account);
             $status = $this->safeGetInstanceStatus($account);
 
             if ($status === 'Unknown') {
                 $status = $cachedStatus;
             }
 
-            if ($newTraffic < 0) {
+            $metadata = [
+                'traffic_api_status' => $trafficResult['status'] ?? 'ok',
+                'traffic_api_message' => $trafficResult['message'] ?? ''
+            ];
+            if ($this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '')) {
+                $metadata['protection_suspended'] = 1;
+                $metadata['protection_suspend_reason'] = 'credential_invalid';
+            } else {
+                $metadata['protection_suspended'] = 0;
+                $metadata['protection_suspend_reason'] = '';
+                $metadata['protection_suspend_notified_at'] = 0;
+            }
+            $trafficApiStatus = $metadata['traffic_api_status'];
+            $trafficApiMessage = $metadata['traffic_api_message'];
+
+            if (empty($trafficResult['success'])) {
                 $traffic = (float) ($account['traffic_used'] ?? 0);
                 $newUpdateTime = $lastUpdate;
             } else {
-                $traffic = $newTraffic;
+                $traffic = (float) ($trafficResult['value'] ?? 0);
                 $this->db->addHourlyStat($account['id'], $traffic);
                 $this->db->addDailyStat($account['id'], $traffic);
             }
@@ -1898,7 +2236,6 @@ class AliyunTrafficCheck
 
             $this->notifyStatusChangeIfNeeded($account, $cachedStatus, $status, '页面刷新检测到实例状态变化。');
 
-            $metadata = [];
             // 如果处于运行中且健康状态未知或非 OK，尝试获取详细状态以识别“操作系统启动中”
             if ($status === 'Running' && ($account['health_status'] ?? '') !== 'OK') {
                 $full = $this->safeGetInstanceFullStatus($account);
@@ -1929,8 +2266,10 @@ class AliyunTrafficCheck
             'accountMasked' => substr($account['access_key_id'], 0, 7) . '***',
             'accountLabel' => $accountDisplayLabel . ' / ' . $this->getRegionName($account['region_id']),
             'flow_total' => $maxTraffic,
-                'flow_used' => round($traffic, 6),
+            'flow_used' => round($traffic, 6),
             'percentageOfUse' => $usagePercent,
+            'trafficStatus' => $trafficApiStatus,
+            'trafficMessage' => $trafficApiMessage,
             'region' => $account['region_id'],
             'regionId' => $account['region_id'],
             'regionName' => $this->getRegionName($account['region_id']),

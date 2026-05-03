@@ -187,12 +187,35 @@ class Database
             updated_at INTEGER NOT NULL
         )");
 
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS telegram_bot_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )");
+
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS telegram_action_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT UNIQUE NOT NULL,
+            user_id TEXT NOT NULL,
+            chat_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            account_id INTEGER NOT NULL,
+            payload TEXT DEFAULT '',
+            expires_at INTEGER NOT NULL,
+            used_at INTEGER DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )");
+
         $this->ensureColumn('accounts', 'traffic_used', 'REAL DEFAULT 0');
         $this->ensureColumn('accounts', 'traffic_billing_month', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'instance_status', "TEXT DEFAULT 'Unknown'");
         $this->ensureColumn('accounts', 'updated_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'last_keep_alive_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'auto_start_blocked', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'schedule_start_enabled', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'schedule_stop_enabled', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'schedule_last_start_date', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'schedule_last_stop_date', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'schedule_blocked_by_traffic', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'remark', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'site_type', "TEXT DEFAULT 'international'");
         $this->ensureColumn('accounts', 'group_key', "TEXT DEFAULT ''");
@@ -210,6 +233,11 @@ class Database
         $this->ensureColumn('accounts', 'os_name', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'stopped_mode', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'health_status', "TEXT DEFAULT 'Unknown'");
+        $this->ensureColumn('accounts', 'traffic_api_status', "TEXT DEFAULT 'ok'");
+        $this->ensureColumn('accounts', 'traffic_api_message', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'protection_suspended', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'protection_suspend_reason', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'protection_suspend_notified_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('ecs_create_tasks', 'public_ip_mode', "TEXT DEFAULT 'ecs_public_ip'");
         $this->ensureColumn('ecs_create_tasks', 'eip_allocation_id', "TEXT DEFAULT ''");
         $this->ensureColumn('ecs_create_tasks', 'eip_address', "TEXT DEFAULT ''");

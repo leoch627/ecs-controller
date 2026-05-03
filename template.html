@@ -11,6 +11,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="static/tailwind-compiled.css">
+    <script>
+        // 自动跟随系统主题
+        (function() {
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (prefersDark) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
     <style>
         :root {
             --canvas: #f8fafc;
@@ -25,6 +34,104 @@
             --danger: #ef4444;
             --warning: #f59e0b;
             --success: #10b981;
+            --input-bg: #ffffff;
+            --glass-input-border: #e5e7eb;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --canvas: #0f172a;
+                --panel: #1e293b;
+                --panel-strong: #334155;
+                --line: #334155;
+                --text: #f1f5f9;
+                --muted: #94a3b8;
+                --accent: #818cf8;
+                --accent-strong: #6366f1;
+                --accent-light: #312e81;
+                --danger: #f87171;
+                --warning: #fbbf24;
+                --success: #34d399;
+                --danger-bg: #7f1d1d;
+                --danger-text: #fca5a5;
+                --warning-bg: #78350f;
+                --warning-text: #fcd34d;
+                --success-bg: #064e3b;
+                --success-text: #6ee7b7;
+                --input-bg: #1e293b;
+                --glass-input-border: #475569;
+                --status-running-bg: #064e3b;
+                --status-running-text: #6ee7b7;
+                --status-stopped-bg: #7f1d1d;
+                --status-stopped-text: #fca5a5;
+                --status-transition-bg: #78350f;
+                --status-transition-text: #fcd34d;
+                --status-unknown-bg: #374151;
+                --status-unknown-text: #9ca3af;
+                --hover-bg: #334155;
+            }
+        }
+
+        [data-theme="light"] {
+            --canvas: #f8fafc;
+            --panel: #ffffff;
+            --panel-strong: #ffffff;
+            --line: #e5e7eb;
+            --text: #111827;
+            --muted: #6b7280;
+            --accent: #4f46e5;
+            --accent-strong: #4338ca;
+            --accent-light: #eef2ff;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --input-bg: #ffffff;
+            --glass-input-border: #e5e7eb;
+        }
+
+        [data-theme="dark"] {
+            --canvas: #0f172a;
+            --panel: #1e293b;
+            --panel-strong: #334155;
+            --line: #334155;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #818cf8;
+            --accent-strong: #6366f1;
+            --accent-light: #312e81;
+            --danger: #f87171;
+            --warning: #fbbf24;
+            --success: #34d399;
+            --danger-bg: #7f1d1d;
+            --danger-text: #fca5a5;
+            --warning-bg: #78350f;
+            --warning-text: #fcd34d;
+            --success-bg: #064e3b;
+            --success-text: #6ee7b7;
+            --input-bg: #1e293b;
+            --glass-input-border: #475569;
+            --status-running-bg: #064e3b;
+            --status-running-text: #6ee7b7;
+            --status-stopped-bg: #7f1d1d;
+            --status-stopped-text: #fca5a5;
+            --status-transition-bg: #78350f;
+            --status-transition-text: #fcd34d;
+            --status-unknown-bg: #374151;
+            --status-unknown-text: #9ca3af;
+            --hover-bg: #334155;
+        }
+
+        /* 暗色模式 Tailwind 类覆盖 */
+        [data-theme="dark"] .bg-white\/65 {
+            background: rgba(30, 41, 59, 0.65);
+        }
+
+        [data-theme="dark"] .border-slate-200\/70 {
+            border-color: rgba(51, 65, 85, 0.7);
+        }
+
+        [data-theme="dark"] .bg-white\/70 {
+            background: rgba(30, 41, 59, 0.7);
         }
 
         @keyframes panel-fade-up {
@@ -92,8 +199,8 @@
         .glass-input,
         .glass-textarea {
             width: 100%;
-            border: 1px solid #e5e7eb;
-            background: #ffffff;
+            border: 1px solid var(--glass-input-border);
+            background: var(--input-bg);
             color: var(--text);
             border-radius: 10px;
             padding: 0.65rem 0.85rem;
@@ -115,7 +222,7 @@
 
         .glass-input:hover,
         .glass-textarea:hover {
-            border-color: #d1d5db;
+            border-color: var(--line);
         }
 
         input[type="number"] {
@@ -160,14 +267,14 @@
             gap: 12px;
             padding: 0.6rem 0.85rem;
             border-radius: 10px;
-            border: 1px solid #e5e7eb;
-            background: #ffffff;
+            border: 1px solid var(--glass-input-border);
+            background: var(--input-bg);
             color: var(--text);
             transition: border-color .15s ease, box-shadow .15s ease;
         }
 
         .select-trigger:hover {
-            border-color: #d1d5db;
+            border-color: var(--line);
         }
 
         .select-shell.open .select-trigger,
@@ -203,7 +310,7 @@
             align-items: center;
             justify-content: center;
             border-radius: 6px;
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             color: var(--muted);
             flex-shrink: 0;
             transition: transform .15s ease;
@@ -223,7 +330,7 @@
             padding: 4px;
             border-radius: 12px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
         }
 
@@ -254,7 +361,7 @@
         }
 
         .select-option:hover {
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
         }
 
         .select-option.selected {
@@ -300,7 +407,7 @@
             border-radius: 12px;
             padding: 12px 16px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         }
 
@@ -386,7 +493,7 @@
         }
 
         .menu-button:hover {
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             color: var(--text);
         }
 
@@ -403,7 +510,7 @@
             align-items: center;
             justify-content: center;
             border-radius: 8px;
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             color: var(--accent);
             flex-shrink: 0;
         }
@@ -420,7 +527,7 @@
         .metric-card {
             border-radius: 14px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             padding: 1.5rem;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
             transition: box-shadow .2s ease, border-color .2s ease;
@@ -429,7 +536,7 @@
 
         .metric-card:hover {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-            border-color: #d1d5db;
+            border-color: var(--line);
         }
 
         .section-title {
@@ -450,30 +557,30 @@
         }
 
         .status-running {
-            background: #ecfdf5;
-            color: #059669;
+            background: var(--status-running-bg, #ecfdf5);
+            color: var(--status-running-text, #059669);
         }
 
         .status-stopped,
         .status-released {
-            background: #fef2f2;
-            color: #dc2626;
+            background: var(--status-stopped-bg, #fef2f2);
+            color: var(--status-stopped-text, #dc2626);
         }
 
         .status-transition {
-            background: #fffbeb;
-            color: #d97706;
+            background: var(--status-transition-bg, #fffbeb);
+            color: var(--status-transition-text, #d97706);
         }
 
         .status-unknown {
-            background: #f3f4f6;
-            color: #6b7280;
+            background: var(--status-unknown-bg, #f3f4f6);
+            color: var(--status-unknown-text, #6b7280);
         }
 
         .table-shell {
             border-radius: 14px;
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel);
             overflow: hidden;
             animation: panel-fade-up .3s ease both;
         }
@@ -490,7 +597,7 @@
             width: 100%;
             height: 6px;
             border-radius: 3px;
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             overflow: hidden;
             border: none !important;
             box-shadow: none !important;
@@ -520,11 +627,18 @@
         .danger-button,
         .success-button,
         .warning-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
             border-radius: 8px;
             padding: 0.5rem 0.85rem;
             font-size: 0.8rem;
             font-weight: 600;
-            transition: background .12s ease, opacity .12s ease;
+            transform: translateY(0);
+            cursor: pointer;
+            user-select: none;
+            transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .12s ease, opacity .12s ease;
         }
 
         .ghost-button:hover,
@@ -532,17 +646,47 @@
         .danger-button:hover,
         .success-button:hover,
         .warning-button:hover {
-            opacity: 0.85;
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+        }
+
+        .ghost-button:active,
+        .solid-button:active,
+        .danger-button:active,
+        .success-button:active,
+        .warning-button:active {
+            transform: translateY(0) scale(0.98);
+            box-shadow: none;
+        }
+
+        .ghost-button:focus-visible,
+        .solid-button:focus-visible,
+        .danger-button:focus-visible,
+        .success-button:focus-visible,
+        .warning-button:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .ghost-button:disabled,
+        .solid-button:disabled,
+        .danger-button:disabled,
+        .success-button:disabled,
+        .warning-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+            transform: none;
+            box-shadow: none;
         }
 
         .ghost-button {
-            background: #f3f4f6;
+            background: var(--hover-bg, #f3f4f6);
             border: 1px solid var(--line);
             color: var(--text);
         }
 
         .ghost-button:hover {
-            background: #e5e7eb;
+            background: var(--line);
             opacity: 1;
         }
 
@@ -552,22 +696,41 @@
             border: none;
         }
 
+        .solid-button:hover {
+            background: var(--accent-strong);
+        }
+
         .success-button {
-            background: #ecfdf5;
-            border: 1px solid #d1fae5;
-            color: #059669;
+            background: var(--success-bg, #ecfdf5);
+            border: 1px solid var(--success-border, #d1fae5);
+            color: var(--success-text, #059669);
+        }
+
+        .success-button:hover {
+            background: color-mix(in srgb, var(--success) 18%, var(--panel));
+            border-color: color-mix(in srgb, var(--success) 42%, var(--line));
         }
 
         .warning-button {
-            background: #fffbeb;
-            border: 1px solid #fef3c7;
-            color: #d97706;
+            background: var(--warning-bg, #fffbeb);
+            border: 1px solid var(--warning-border, #fef3c7);
+            color: var(--warning-text, #d97706);
+        }
+
+        .warning-button:hover {
+            background: color-mix(in srgb, var(--warning) 18%, var(--panel));
+            border-color: color-mix(in srgb, var(--warning) 42%, var(--line));
         }
 
         .danger-button {
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            color: #dc2626;
+            background: var(--danger-bg, #fef2f2);
+            border: 1px solid var(--danger-border, #fecaca);
+            color: var(--danger-text, #dc2626);
+        }
+
+        .danger-button:hover {
+            background: color-mix(in srgb, var(--danger) 18%, var(--panel));
+            border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
         }
 
         .sync-button {
@@ -591,6 +754,73 @@
             color: #dc2626;
         }
 
+        .sync-note {
+            margin-top: 6px;
+            font-size: 12px;
+            line-height: 1.45;
+            color: var(--muted);
+        }
+
+        .sync-note.error {
+            color: #dc2626;
+        }
+
+        .sync-note.success {
+            color: #059669;
+        }
+
+        .test-result-card {
+            margin-top: 18px;
+            padding: 16px;
+            border-radius: 18px;
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            background: rgba(248, 250, 252, 0.92);
+            display: grid;
+            gap: 10px;
+        }
+
+        .test-result-card.warning {
+            border-color: #fecaca;
+            background: #fff7f7;
+        }
+
+        .test-result-card.success {
+            border-color: #bbf7d0;
+            background: #f0fdf4;
+        }
+
+        .test-result-line {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 13px;
+        }
+
+        .test-result-line strong {
+            color: #0f172a;
+        }
+
+        .test-result-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 72px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #ecfdf5;
+            color: #059669;
+            border: 1px solid #d1fae5;
+        }
+
+        .test-result-badge.warning {
+            background: #fef2f2;
+            color: #dc2626;
+            border-color: #fecaca;
+        }
+
         .chip {
             display: inline-flex;
             align-items: center;
@@ -598,7 +828,7 @@
             padding: 0.2rem 0.55rem;
             border-radius: 6px;
             border: 1px solid var(--line);
-            background: #f9fafb;
+            background: var(--panel);
             font-size: 0.75rem;
             color: var(--muted);
         }
@@ -609,7 +839,7 @@
         }
 
         .switch-row:hover {
-            background: #f9fafb;
+            background: var(--panel);
         }
 
         .switch-control {
@@ -625,14 +855,16 @@
             inset: 0;
             opacity: 0;
             cursor: pointer;
+            z-index: 2;
         }
 
         .switch-slider {
             position: absolute;
             inset: 0;
             border-radius: 999px;
-            background: #d1d5db;
+            background: var(--line);
             transition: background .15s ease;
+            pointer-events: none;
         }
 
         .switch-slider::after {
@@ -661,18 +893,232 @@
             outline-offset: 2px;
         }
 
+        .schedule-card {
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            background: color-mix(in srgb, var(--panel) 82%, transparent);
+            padding: 1rem;
+        }
+
+        .schedule-card__header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .schedule-card__hint {
+            margin-top: 0.2rem;
+            color: var(--muted);
+            font-size: 0.75rem;
+            line-height: 1.6;
+        }
+
+        .schedule-option {
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            background: color-mix(in srgb, var(--panel-strong) 78%, transparent);
+            padding: 1rem;
+        }
+
+        .schedule-option__top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .time-picker {
+            position: relative;
+            width: 100%;
+        }
+
+        .time-picker__trigger {
+            width: 100%;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            border: 1px solid var(--glass-input-border);
+            border-radius: 12px;
+            background: var(--input-bg);
+            color: var(--text);
+            padding: 0.65rem 0.85rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-align: left;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+
+        .time-picker.open .time-picker__trigger,
+        .time-picker__trigger:focus-visible {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+        }
+
+        .time-picker__trigger:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .time-picker__value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        }
+
+        .time-picker__placeholder {
+            color: var(--muted);
+            font-family: inherit;
+            font-weight: 500;
+        }
+
+        .time-picker__icon {
+            width: 1.35rem;
+            height: 1.35rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            flex: 0 0 auto;
+        }
+
+        .time-picker__panel {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            z-index: 80;
+            width: min(280px, calc(100vw - 40px));
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--panel);
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+            padding: 0.65rem;
+        }
+
+        .time-picker.drop-up .time-picker__panel {
+            top: auto;
+            bottom: calc(100% + 8px);
+        }
+
+        .time-picker__columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.45rem;
+        }
+
+        .time-picker__column {
+            max-height: min(180px, 32vh);
+            overflow-y: auto;
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--panel-strong) 54%, transparent);
+            padding: 0.25rem;
+            scrollbar-width: thin;
+            scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+        }
+
+        .time-picker__column::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .time-picker__column::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .time-picker__column::-webkit-scrollbar-thumb {
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--muted) 45%, transparent);
+        }
+
+        .time-picker__item {
+            width: 100%;
+            border-radius: 10px;
+            color: var(--text);
+            padding: 0.48rem 0.3rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .time-picker__item:hover {
+            background: var(--hover-bg, #f3f4f6);
+        }
+
+        .time-picker__item.active {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .time-picker__actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-top: 0.65rem;
+        }
+
+        .time-picker__action {
+            border-radius: 10px;
+            padding: 0.45rem 0.7rem;
+            color: var(--accent);
+            font-size: 0.8rem;
+            font-weight: 700;
+            transition: background .16s ease, color .16s ease, transform .12s ease;
+        }
+
+        .time-picker__action:hover {
+            background: var(--accent-light);
+            transform: translateY(-1px);
+        }
+
+        .time-picker__action:active {
+            transform: translateY(0) scale(0.98);
+        }
+
+        .time-picker__confirm {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .time-picker__confirm:hover {
+            background: var(--accent-strong);
+            color: #fff;
+        }
+
+        .schedule-alert {
+            margin-top: 0.75rem;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+            border-radius: 18px;
+            background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+            padding: 0.75rem 1rem;
+        }
+
+        .schedule-alert p {
+            margin: 0;
+            color: var(--danger);
+            font-size: 0.875rem;
+            font-weight: 700;
+            line-height: 1.55;
+        }
+
         .account-row {
             display: grid;
             grid-template-columns: minmax(180px, 1.45fr) minmax(120px, 0.9fr) minmax(110px, 0.8fr) 180px 220px 180px;
             gap: 0.85rem;
             padding: 0.85rem 1rem;
-            border-bottom: 1px solid #f3f4f6;
+            border-bottom: 1px solid var(--line);
             align-items: center;
             transition: background .1s ease;
         }
 
         .account-row:hover {
-            background: #f9fafb;
+            background: var(--panel);
         }
 
         .account-row:last-child {
@@ -694,7 +1140,7 @@
         }
 
         .summary-table-head {
-            background: #f9fafb;
+            background: var(--panel);
             color: var(--muted);
             font-size: 0.75rem;
             font-weight: 600;
@@ -787,7 +1233,7 @@
             margin-top: 16px;
             border: 1px solid var(--line);
             border-radius: 12px;
-            background: #f9fafb;
+            background: var(--panel);
             padding: 16px;
         }
 
@@ -834,7 +1280,7 @@
             border: 1px solid var(--line);
             border-radius: 10px;
             padding: 10px 12px;
-            background: #f9fafb;
+            background: var(--panel);
             font-size: 0.875rem;
             color: #374151;
         }
@@ -1043,7 +1489,7 @@
             justify-content: space-between;
             gap: 12px;
             border-radius: 8px;
-            background: #ffffff;
+            background: var(--panel);
             padding: 8px 10px;
         }
 
@@ -1142,7 +1588,7 @@
             flex: 0 0 48px;
             border-radius: 16px;
             object-fit: contain;
-            background: #ffffff;
+            background: var(--panel);
             border: 1px solid rgba(148, 163, 184, 0.18);
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
         }
@@ -1166,7 +1612,7 @@
             height: 72px;
             border-radius: 20px;
             object-fit: contain;
-            background: #ffffff;
+            background: var(--panel);
             border: 1px solid var(--line);
             box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
         }
@@ -1250,7 +1696,7 @@
         }
 
         .table-scroll tbody tr:hover {
-            background: #f9fafb;
+            background: var(--panel);
         }
 
         .batch-bar-enter-active {
@@ -1353,7 +1799,7 @@
         }
 
         .muted-text-strong {
-            color: #7c8698;
+            color: var(--muted);
         }
 
         .body-text {
@@ -1361,8 +1807,12 @@
         }
 
         .text-dark-button {
-            background: #1f2937 !important;
+            background: var(--accent) !important;
             color: #fff !important;
+        }
+
+        [data-theme="dark"] .text-dark-button {
+            background: var(--accent-strong) !important;
         }
 
         .compact-button {
@@ -1403,19 +1853,19 @@
         }
 
         .text-slate-500 {
-            color: #6f7787;
+            color: var(--muted);
         }
 
         .text-slate-400 {
-            color: #7c8698;
+            color: var(--muted);
         }
 
         .text-\[\#6f7787\] {
             color: #6f7787;
         }
 
-        .text-\[\#7c8698\] {
-            color: #7c8698;
+        .text-\[\var(--muted)\] {
+            color: var(--muted);
         }
 
         .text-\[\#334155\] {
@@ -1924,13 +2374,13 @@
                                     <div class="min-w-0">
                                         <p class="subtle-label">备注</p>
                                         <h3 class="mt-1 truncate text-lg font-bold">{{ item.remark || item.instanceName || item.instanceId }}</h3>
-                                        <p class="mt-1 text-xs text-[#7c8698]">{{ item.accountLabel }}</p>
+                                        <p class="mt-1 text-xs text-[var(--muted)]">{{ item.accountLabel }}</p>
                                     </div>
                                     <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
                                         <span v-if="!(item.status === 'Stopped' && item.stoppedMode === 'StopCharging')" class="status-pill" :class="statusClass(item.instanceStatus)">
                                             {{ statusText(item.instanceStatus) }}
                                         </span>
-                                        <span v-else class="status-pill status-unknown !bg-slate-100 !border !border-slate-200 !text-slate-600">
+                                        <span v-else class="status-pill status-unknown">
                                             节省停机
                                         </span>
                                         <span v-if="item.status === 'Running' && item.healthStatus === 'Initializing'" class="status-pill status-transition !text-[10px] animate-pulse">
@@ -1942,17 +2392,17 @@
                                 <div class="mt-8 space-y-5">
                                     <div class="grid grid-cols-2 gap-5">
                                         <div class="min-w-0">
-                                            <p class="text-[13px] text-[#7c8698] mb-1">硬件系统</p>
+                                            <p class="text-[13px] text-[var(--muted)] mb-1">硬件系统</p>
                                             <p class="text-[14px] text-slate-700 truncate" :title="item.osName">{{ item.osName || '-' }}</p>
                                         </div>
                                         <div class="min-w-0">
-                                            <p class="text-[13px] text-[#7c8698] mb-1">规格</p>
+                                            <p class="text-[13px] text-[var(--muted)] mb-1">规格</p>
                                             <p class="text-[14px] text-slate-700 font-semibold">{{ item.cpu }} 核 {{ item.memory < 1024 ? item.memory + ' MiB' : (item.memory/1024).toFixed(1) + ' GiB' }}</p>
                                         </div>
                                     </div>
                                     <div class="grid grid-cols-1">
                                         <div class="min-w-0">
-                                            <p class="text-[13px] text-[#7c8698] mb-1">公网 IP</p>
+                                            <p class="text-[13px] text-[var(--muted)] mb-1">公网 IP</p>
                                             <p class="text-[14px] text-slate-700 font-mono">{{ isAdmin ? (item.publicIp || '-') : '登录后可见' }}</p>
                                         </div>
                                     </div>
@@ -1960,19 +2410,25 @@
 
                                 <div class="mt-8">
                                     <div class="flex items-end justify-between mb-3">
-                                        <span class="text-[12px] text-[#7c8698]">流量消耗 ({{ item.percentageOfUse }}%)</span>
+                                        <span class="text-[12px] text-[var(--muted)]">流量消耗 ({{ item.percentageOfUse }}%)</span>
                                         <span class="text-[15px] font-bold text-slate-800">
-                                            {{ formatTrafficValue(item.flow_used) }} <span class="text-[#7c8698] font-normal text-[14px]">/ {{ item.flow_total }} GB</span>
+                                            <template v-if="hasTrafficIssue(item)">
+                                                <span class="text-[#dc2626] text-[14px]">{{ trafficIssueText(item) }}</span>
+                                            </template>
+                                            <template v-else>
+                                                {{ formatTrafficValue(item.flow_used) }} <span class="text-[var(--muted)] font-normal text-[14px]">/ {{ item.flow_total }} GB</span>
+                                            </template>
                                         </span>
                                     </div>
                                     <div class="progress-track h-2">
                                         <div class="progress-fill h-full" :class="{ warning: item.rate95 }"
                                             :style="{ width: Math.min(item.percentageOfUse, 100) + '%' }"></div>
                                     </div>
+                                    <p v-if="hasTrafficIssue(item)" class="mt-2 text-xs text-[#dc2626]">{{ trafficIssueText(item) }}</p>
                                 </div>
 
-                                <div class="mt-6 flex items-center justify-between pt-4 text-xs text-[#7c8698]">
-                                    <div class="flex items-center gap-1.5 text-[11px] text-[#7c8698]">
+                                <div class="mt-6 flex items-center justify-between pt-4 text-xs text-[var(--muted)]">
+                                    <div class="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
                                         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                         <span>{{ item.lastUpdated }}</span>
                                     </div>
@@ -1986,7 +2442,7 @@
                             </article>
 
                             <div v-if="filteredStatusInstances.length === 0" class="metric-card" style="grid-column: 1 / -1;">
-                                <p class="text-center text-sm text-[#7c8698]">暂无实例状态数据。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">暂无实例状态数据。</p>
                             </div>
                         </div>
                     </section>
@@ -2039,7 +2495,7 @@
                         </div>
 
                         <div class="table-shell desktop-visible" style="margin-top: 24px;">
-                            <div class="bg-white/65 px-5 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[#7c8698]">
+                            <div class="bg-white/65 px-5 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
                                 列表模式
                             </div>
                             <div class="overflow-x-auto">
@@ -2078,12 +2534,14 @@
                                     <div class="summary-cell center-column">
                                         <div class="account-usage">
                                             <div class="account-usage__meta single">
-                                                <span>{{ formatTrafficValue(inst.flow_used) }} / {{ inst.flow_total }} GB</span>
+                                                <span v-if="hasTrafficIssue(inst)" class="text-[#dc2626]">{{ trafficIssueText(inst) }}</span>
+                                                <span v-else>{{ formatTrafficValue(inst.flow_used) }} / {{ inst.flow_total }} GB</span>
                                             </div>
                                             <div class="progress-track account-usage__bar">
                                                 <div class="progress-fill" :class="{ warning: inst.rate95 }"
                                                     :style="{ width: Math.min(inst.percentageOfUse, 100) + '%' }"></div>
                                             </div>
+                                            <div v-if="hasTrafficIssue(inst)" class="mt-1 text-xs text-[#dc2626]">{{ trafficIssueText(inst) }}</div>
                                         </div>
                                     </div>
                                     <div class="summary-cell center-column">
@@ -2099,7 +2557,7 @@
                                     </div>
                                 </div>
 
-                                <div v-if="filteredManagedInstances.length === 0" class="px-5 py-12 text-center text-sm text-[#7c8698]">
+                                <div v-if="filteredManagedInstances.length === 0" class="px-5 py-12 text-center text-sm text-[var(--muted)]">
                                     暂无实例数据，点击"手动同步"获取最新实例。
                                 </div>
                                 </div>
@@ -2111,15 +2569,15 @@
                                 <div class="flex items-start justify-between gap-3">
                                     <div>
                                         <p class="text-base font-bold">{{ inst.remark || inst.instanceName || inst.instanceId }}</p>
-                                        <p class="mt-1 font-mono text-xs text-[#7c8698]">{{ inst.instanceId }}</p>
+                                        <p class="mt-1 font-mono text-xs text-[var(--muted)]">{{ inst.instanceId }}</p>
                                     </div>
                                 </div>
                                 <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
-                                    <div><span class="text-[#7c8698]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
-                                    <div><span class="text-[#7c8698]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
-                                    <div><span class="text-[#7c8698]">状态</span><p class="mt-1"><span class="status-pill" :class="statusClass(inst.instanceStatus)">{{ statusText(inst.instanceStatus) }}</span></p></div>
-                                    <div><span class="text-[#7c8698]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[#7c8698]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
-                                    <div><span class="text-[#7c8698]">公网带宽峰值</span><p class="mt-1">{{ inst.internetMaxBandwidthOut ? inst.internetMaxBandwidthOut + ' Mbps' : '-' }}</p></div>
+                                    <div><span class="text-[var(--muted)]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
+                                    <div><span class="text-[var(--muted)]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
+                                    <div><span class="text-[var(--muted)]">状态</span><p class="mt-1"><span class="status-pill" :class="statusClass(inst.instanceStatus)">{{ statusText(inst.instanceStatus) }}</span></p></div>
+                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
+                                    <div><span class="text-[var(--muted)]">公网带宽峰值</span><p class="mt-1">{{ inst.internetMaxBandwidthOut ? inst.internetMaxBandwidthOut + ' Mbps' : '-' }}</p></div>
                                 </div>
                                 <div v-if="inst.operationLocked || inst.instanceStatus === 'Releasing'" class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-700">
                                     释放中，不可操作
@@ -2133,7 +2591,7 @@
                             </article>
 
                             <div v-if="filteredManagedInstances.length === 0" class="metric-card">
-                                <p class="text-center text-sm text-[#7c8698]">暂无实例数据。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">暂无实例数据。</p>
                             </div>
                         </div>
                     </section>
@@ -2151,7 +2609,7 @@
                         </div>
 
                         <div class="table-shell desktop-visible" style="margin-top: 24px;">
-                            <div class="bg-white/65 px-4 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[#7c8698]">
+                            <div class="bg-white/65 px-4 py-3 text-xs font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
                                 列表模式
                             </div>
                             <div>
@@ -2178,12 +2636,14 @@
                                     <div class="summary-cell center-column">
                                         <div class="account-usage">
                                             <div class="account-usage__meta single">
-                                                <span>{{ formatTrafficValue(acc.usageUsed) }} / {{ acc.maxTraffic }} GB</span>
+                                                <span v-if="hasTrafficIssue(acc)" class="text-[#dc2626]">{{ trafficIssueText(acc) }}</span>
+                                                <span v-else>{{ formatTrafficValue(acc.usageUsed) }} / {{ acc.maxTraffic }} GB</span>
                                             </div>
                                             <div class="progress-track account-usage__bar">
                                                 <div class="progress-fill" :class="{ warning: (acc.usagePercent || 0) >= 95 }"
                                                     :style="{ width: Math.min(acc.usagePercent || 0, 100) + '%' }"></div>
                                             </div>
+                                            <div v-if="hasTrafficIssue(acc)" class="mt-1 text-xs text-[#dc2626]">{{ trafficIssueText(acc) }}</div>
                                         </div>
                                     </div>
                                     <div class="summary-cell center-column">
@@ -2204,20 +2664,30 @@
                                         </div>
                                     </div>
 	                                    <div class="summary-cell center-column">
+	                                        <div>
 	                                        <div class="row-actions">
 	                                            <button @click="syncAccount(idx)" class="ghost-button compact-button sync-button"
                                                     :class="getAccountSyncButtonClass(idx)"
                                                     :disabled="isSyncingAccount(idx)">
 	                                                {{ getAccountSyncLabel(idx) }}
 	                                            </button>
+                                                <button v-if="acc.scheduleBlockedByTraffic" @click="restoreScheduleBlock(idx)" class="ghost-button compact-button"
+                                                    :disabled="isRestoringScheduleBlock(idx)">
+                                                    {{ isRestoringScheduleBlock(idx) ? '恢复中...' : '恢复定时' }}
+                                                </button>
 	                                            <button @click="openEditAccountModal(idx)" class="ghost-button compact-button">编辑</button>
 	                                            <button @click="removeAccountRow(idx)" class="danger-button compact-button">删除</button>
 	                                        </div>
+                                            <div v-if="getAccountSyncResult(idx)?.message" class="sync-note"
+                                                :class="{ error: !getAccountSyncResult(idx)?.success, success: getAccountSyncResult(idx)?.success }">
+                                                {{ getAccountSyncResult(idx)?.message }}
+                                            </div>
+                                            </div>
 	                                    </div>
 	                                </div>
 
                                 <div v-if="config.Accounts.length === 0" class="account-row">
-                                    <div class="summary-cell" style="grid-column: 1 / -1; text-align: center; color: #7c8698;">
+                                    <div class="summary-cell" style="grid-column: 1 / -1; text-align: center; color: var(--muted);">
                                         还没有账号，点击“新增账号”开始配置。
                                     </div>
                                 </div>
@@ -2228,16 +2698,21 @@
                             <article v-for="(acc, idx) in config.Accounts" :key="'account-card-' + idx" class="metric-card">
                                 <div class="flex items-center justify-between">
                                     <h3 class="text-base font-bold">{{ acc.remark || `账号 ${idx + 1}` }}</h3>
-                                    <span class="text-xs text-[#7c8698]">{{ acc.instanceCount || 0 }} 台实例</span>
+                                    <span class="text-xs text-[var(--muted)]">{{ acc.instanceCount || 0 }} 台实例</span>
                                 </div>
                                 <div class="account-card-grid">
                                     <div>区域：{{ getRegionName(acc.regionId) }}</div>
                                     <div>站点：{{ getSiteTypeLabel(acc.siteType) }}</div>
-                                    <div>账号流量：{{ formatTrafficValue(acc.usageUsed) }} / {{ acc.maxTraffic }} GB</div>
+                                    <div>
+                                        账号流量：
+                                        <span v-if="hasTrafficIssue(acc)" class="text-[#dc2626]">{{ trafficIssueText(acc) }}</span>
+                                        <span v-else>{{ formatTrafficValue(acc.usageUsed) }} / {{ acc.maxTraffic }} GB</span>
+                                    </div>
                                     <div class="progress-track">
                                         <div class="progress-fill" :class="{ warning: (acc.usagePercent || 0) >= 95 }"
                                             :style="{ width: Math.min(acc.usagePercent || 0, 100) + '%' }"></div>
                                     </div>
+                                    <div v-if="hasTrafficIssue(acc)" class="text-xs text-[#dc2626]">{{ trafficIssueText(acc) }}</div>
                                     <div v-if="acc.billing && acc.billing.enabled && !acc.billing.error">消费情况：本月消费 {{ formatCurrencyValue(acc.billing.monthly_cost, acc.billing.currency) }} / 余额 {{ formatCurrencyValue(acc.billing.balance, acc.billing.currency) }}</div>
                                     <div v-else-if="acc.billing && acc.billing.error" class="account-billing__error">{{ acc.billing.error }}</div>
                                     <div v-else class="account-billing__hint">消费情况：未启用 费用中心</div>
@@ -2248,13 +2723,21 @@
                                             :disabled="isSyncingAccount(idx)">
 	                                        {{ getAccountSyncLabel(idx) }}
 	                                    </button>
+                                        <button v-if="acc.scheduleBlockedByTraffic" @click="restoreScheduleBlock(idx)" class="ghost-button !px-3 !py-2"
+                                            :disabled="isRestoringScheduleBlock(idx)">
+                                            {{ isRestoringScheduleBlock(idx) ? '恢复中...' : '恢复定时' }}
+                                        </button>
 	                                    <button @click="openEditAccountModal(idx)" class="ghost-button !px-3 !py-2">编辑</button>
 	                                    <button @click="removeAccountRow(idx)" class="danger-button !px-3 !py-2">删除</button>
 	                                </div>
+                                    <div v-if="getAccountSyncResult(idx)?.message" class="sync-note"
+                                        :class="{ error: !getAccountSyncResult(idx)?.success, success: getAccountSyncResult(idx)?.success }">
+                                        {{ getAccountSyncResult(idx)?.message }}
+                                    </div>
                             </article>
 
                             <div v-if="config.Accounts.length === 0" class="metric-card">
-                                <p class="text-center text-sm text-[#7c8698]">还没有账号，点击“新增账号”开始配置。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">还没有账号，点击“新增账号”开始配置。</p>
                             </div>
                         </div>
                     </section>
@@ -2286,7 +2769,7 @@
                                                     </label>
                                                     <button v-if="config.AppBrand.logo_url" @click="clearLogo" type="button" class="danger-button">清除 Logo</button>
                                                 </div>
-                                                <p class="text-xs leading-5 text-[#7c8698]">支持 PNG、JPG、WebP，上传文件小于 2MB。也可以直接填写图片 URL。</p>
+                                                <p class="text-xs leading-5 text-[var(--muted)]">支持 PNG、JPG、WebP，上传文件小于 2MB。也可以直接填写图片 URL。</p>
                                             </div>
                                         </div>
                                     </div>
@@ -2384,7 +2867,7 @@
                                     <input type="hidden" v-model="config.Ddns.provider">
                                     <div class="rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
                                         <div class="font-bold text-[#1f2937]">Cloudflare</div>
-                                        <div class="mt-1 text-xs leading-5 text-[#7c8698]">当前仅支持 Cloudflare，后续可扩展其他 DNS 服务商。</div>
+                                        <div class="mt-1 text-xs leading-5 text-[var(--muted)]">当前仅支持 Cloudflare，后续可扩展其他 DNS 服务商。</div>
                                     </div>
                                     <div>
                                         <label class="mb-2 block text-sm font-semibold text-[#6f7787]">Cloudflare API Token</label>
@@ -2407,7 +2890,7 @@
                                             <span class="switch-slider"></span>
                                         </span>
                                     </label>
-                                    <p class="text-xs leading-6 text-[#7c8698]">
+                                    <p class="text-xs leading-6 text-[var(--muted)]">
                                         必填：API Token 和根域名。Zone ID 可不填，系统会根据根域名自动查询。命名规则：单机器使用“账号备注.根域名”；同账号多机器使用“账号备注-实例备注或实例短 ID.根域名”。
                                     </p>
                                 </div>
@@ -2509,6 +2992,15 @@
                                     </label>
 	                                    <input v-model="config.Notification.telegram.token" class="glass-input" placeholder="机器人令牌">
 	                                    <input v-model="config.Notification.telegram.chat_id" class="glass-input" placeholder="接收会话编号">
+                                    <div class="rounded-[18px] border border-slate-200/70 bg-white/60 p-4">
+                                        <p class="text-sm font-bold text-[#0f172a]">Telegram 远程控制</p>
+                                        <p class="mt-1 text-xs leading-5 text-[#64748b]">配置 Telegram 通知后默认可通过 Bot 控制实例。发送 /start 打开按钮菜单，支持查看流量、开机和二次确认释放。</p>
+                                        <div class="mt-3 two-col-grid">
+                                            <input v-model="config.Notification.telegram.allowed_user_ids" class="glass-input" placeholder="允许控制用户 ID（可选，多个用逗号分隔）">
+                                            <input v-model.number="config.Notification.telegram.confirm_ttl" type="number" min="30" class="glass-input" placeholder="释放确认有效期（秒）">
+                                        </div>
+                                        <p class="mt-2 text-xs text-[#94a3b8]">私聊 Bot 时可不填用户 ID；群聊使用时建议填写，避免群成员误操作。</p>
+                                    </div>
                                     <app-select
                                         v-model="config.Notification.telegram.proxy_type"
                                         class="glass-select"
@@ -2581,18 +3073,20 @@
                             <article v-for="log in systemLogs" :key="log.id || log.time_str + log.message" class="metric-card log-card">
                                 <div class="flex flex-wrap items-center justify-between gap-2">
                                     <div class="flex items-center gap-2">
-                                        <span v-if="currentLogTab === 'action'" class="status-pill"
-                                            :class="log.type === 'warning' ? 'status-transition' : log.type === 'error' ? 'status-stopped' : 'status-running'">
+                                        <span class="status-pill"
+                                            :class="currentLogTab === 'action'
+                                                ? (log.type === 'warning' ? 'status-transition' : log.type === 'error' ? 'status-stopped' : 'status-running')
+                                                : (log.type === 'error' ? 'status-stopped' : log.type === 'warning' ? 'status-transition' : 'status-running')">
                                             {{ logTypeLabel(log.type) }}
                                         </span>
-                                        <span class="text-xs text-[#7c8698] font-mono">{{ log.time_str }}</span>
+                                        <span class="text-xs text-[var(--muted)] font-mono">{{ log.time_str }}</span>
                                     </div>
                                 </div>
-                                <p class="mt-3 font-mono text-sm leading-6 text-[#334155]">{{ log.message }}</p>
+                                <p class="mt-3 font-mono text-sm leading-6">{{ log.message }}</p>
                             </article>
 
                             <div v-if="systemLogs.length === 0" class="metric-card">
-                                <p class="text-center text-sm text-[#7c8698]">当前没有日志记录。</p>
+                                <p class="text-center text-sm text-[var(--muted)]">当前没有日志记录。</p>
                             </div>
                         </div>
                     </section>
@@ -2718,10 +3212,90 @@
                         <label class="field-label">账号可用流量（GB）</label>
                         <input v-model.number="accountDraft.maxTraffic" type="number" min="1" class="glass-input" placeholder="200">
                     </div>
+                    <div class="modal-field-full schedule-card">
+                        <div class="schedule-card__header">
+                            <div>
+                                <label class="field-label !mb-1">定时开关机</label>
+                                <p class="schedule-card__hint">支持每天按计划时间自动开机、自动停机。定时停机将沿用系统设置里的停机方式。</p>
+                            </div>
+                            <span class="switch-control">
+                                <input v-model="accountDraft.scheduleEnabled" type="checkbox">
+                                <span class="switch-slider"></span>
+                            </span>
+                        </div>
+                        <div v-if="accountDraft.scheduleEnabled" class="mt-4 grid gap-4 md:grid-cols-2">
+                            <div class="schedule-option">
+                                <div class="schedule-option__top">
+                                    <label class="field-label !mb-0">定时开机</label>
+                                    <span class="switch-control">
+                                        <input v-model="accountDraft.scheduleStartEnabled" type="checkbox">
+                                        <span class="switch-slider"></span>
+                                    </span>
+                                </div>
+                                <time-picker
+                                    v-model="accountDraft.startTime"
+                                    placeholder="请选择开机时间"
+                                    :disabled="!accountDraft.scheduleStartEnabled"
+                                />
+                            </div>
+                            <div class="schedule-option">
+                                <div class="schedule-option__top">
+                                    <label class="field-label !mb-0">定时停机</label>
+                                    <span class="switch-control">
+                                        <input v-model="accountDraft.scheduleStopEnabled" type="checkbox">
+                                        <span class="switch-slider"></span>
+                                    </span>
+                                </div>
+                                <time-picker
+                                    v-model="accountDraft.stopTime"
+                                    placeholder="请选择停机时间"
+                                    :disabled="!accountDraft.scheduleStopEnabled"
+                                />
+                            </div>
+                        </div>
+                        <div v-if="accountDraft.scheduleBlockedByTraffic" class="schedule-alert">
+                            <p>该账号下实例曾因流量阈值触发自动停机，定时开关机会暂停；阿里云自然月重置后系统会自动恢复。</p>
+                            <button v-if="accountModalMode === 'edit'" @click="restoreScheduleBlock(editingAccountIndex)" class="ghost-button compact-button"
+                                :disabled="isRestoringScheduleBlock(editingAccountIndex)">
+                                {{ isRestoringScheduleBlock(editingAccountIndex) ? '恢复中...' : '手动恢复' }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="accountDraftTestResult" class="test-result-card"
+                    :class="accountDraftTestResult.monitorStatus === 'warning' || !accountDraftTestResult.success ? 'warning' : 'success'">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-sm font-bold text-[#0f172a]">账号测试结果</p>
+                            <p class="mt-1 text-xs text-[#64748b]">{{ accountDraftTestResult.message }}</p>
+                        </div>
+                        <span class="test-result-badge"
+                            :class="{ warning: accountDraftTestResult.monitorStatus === 'warning' || !accountDraftTestResult.success }">
+                            {{ accountDraftTestResult.monitorStatus === 'warning' || !accountDraftTestResult.success ? '需处理' : '通过' }}
+                        </span>
+                    </div>
+                    <div class="test-result-line">
+                        <strong>ECS 接口</strong>
+                        <span>已接通</span>
+                    </div>
+                    <div class="test-result-line">
+                        <strong>云监控接口</strong>
+                        <span :class="{ 'text-[#dc2626]': accountDraftTestResult.monitorStatus === 'warning' }">
+                            {{ accountDraftTestResult.monitorMessage || '未测试' }}
+                        </span>
+                    </div>
+                    <div class="test-result-line">
+                        <strong>当前区域实例数</strong>
+                        <span>{{ accountDraftTestResult.instanceCount ?? 0 }} 台</span>
+                    </div>
                 </div>
 
                 <div class="top-action-row" style="justify-content: flex-end; margin-top: 24px;">
                     <button @click="closeAccountModal" class="ghost-button">取消</button>
+                    <button @click="testAccountDraft" class="ghost-button" :disabled="testingAccountDraft || savingAccountModal">
+                        {{ testingAccountDraft ? '测试中...' : '测试账号' }}
+                    </button>
                     <button @click="saveAccountModal" class="solid-button" :disabled="savingAccountModal">
                         {{ savingAccountModal ? '保存中...' : '保存账号' }}
                     </button>
@@ -3081,9 +3655,178 @@
             `
         };
 
+        const TimePicker = {
+            name: 'TimePicker',
+            props: {
+                modelValue: {
+                    type: String,
+                    default: ''
+                },
+                placeholder: {
+                    type: String,
+                    default: '请选择时间'
+                },
+                disabled: {
+                    type: Boolean,
+                    default: false
+                }
+            },
+            emits: ['update:modelValue'],
+            setup(props, { emit }) {
+                const open = ref(false);
+                const root = ref(null);
+                const dropUp = ref(false);
+                const tempHour = ref('00');
+                const tempMinute = ref('00');
+                const instanceId = `time-${Math.random().toString(36).slice(2)}`;
+                const hours = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'));
+                const minutes = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, '0'));
+
+                const syncTemp = () => {
+                    const match = String(props.modelValue || '').match(/^(\d{2}):(\d{2})$/);
+                    tempHour.value = match ? match[1] : '00';
+                    tempMinute.value = match ? match[2] : '00';
+                };
+
+                const toggle = () => {
+                    if (props.disabled) return;
+                    if (!open.value) {
+                        syncTemp();
+                        window.dispatchEvent(new CustomEvent('app-select-opened', {
+                            detail: { id: instanceId }
+                        }));
+                        requestAnimationFrame(() => {
+                            if (!root.value) return;
+                            const rect = root.value.getBoundingClientRect();
+                            dropUp.value = (window.innerHeight - rect.bottom) < 320 && rect.top > 260;
+                        });
+                    }
+                    open.value = !open.value;
+                };
+
+                const selectHour = (hour) => {
+                    tempHour.value = hour;
+                };
+
+                const selectMinute = (minute) => {
+                    tempMinute.value = minute;
+                };
+
+                const confirm = () => {
+                    emit('update:modelValue', `${tempHour.value}:${tempMinute.value}`);
+                    open.value = false;
+                };
+
+                const setNow = () => {
+                    const now = new Date();
+                    tempHour.value = String(now.getHours()).padStart(2, '0');
+                    tempMinute.value = String(now.getMinutes()).padStart(2, '0');
+                    confirm();
+                };
+
+                const handleClickOutside = (event) => {
+                    if (root.value && !root.value.contains(event.target)) {
+                        open.value = false;
+                    }
+                };
+
+                const handleKeydown = (event) => {
+                    if (!root.value || !root.value.contains(document.activeElement)) return;
+                    if (event.key === 'Escape') {
+                        open.value = false;
+                    }
+                    if (event.key === 'Enter' && open.value) {
+                        confirm();
+                    }
+                };
+
+                const handleSelectOpened = (event) => {
+                    if (event?.detail?.id !== instanceId) {
+                        open.value = false;
+                    }
+                };
+
+                watch(() => props.modelValue, syncTemp, { immediate: true });
+
+                onMounted(() => {
+                    document.addEventListener('click', handleClickOutside);
+                    document.addEventListener('keydown', handleKeydown);
+                    window.addEventListener('app-select-opened', handleSelectOpened);
+                });
+
+                onUnmounted(() => {
+                    document.removeEventListener('click', handleClickOutside);
+                    document.removeEventListener('keydown', handleKeydown);
+                    window.removeEventListener('app-select-opened', handleSelectOpened);
+                });
+
+                return {
+                    open,
+                    dropUp,
+                    root,
+                    hours,
+                    minutes,
+                    tempHour,
+                    tempMinute,
+                    toggle,
+                    selectHour,
+                    selectMinute,
+                    confirm,
+                    setNow
+                };
+            },
+            template: `
+                <div ref="root" class="time-picker" :class="{ open, 'drop-up': dropUp }">
+                    <button type="button" class="time-picker__trigger" :disabled="disabled" @click.stop="toggle">
+                        <span class="time-picker__value" :class="{ 'time-picker__placeholder': !modelValue }">
+                            {{ modelValue || placeholder }}
+                        </span>
+                        <span class="time-picker__icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+                                <circle cx="12" cy="12" r="9"/>
+                                <path d="M12 7v5l3 2"/>
+                            </svg>
+                        </span>
+                    </button>
+
+                    <transition name="select-pop">
+                        <div v-if="open" class="time-picker__panel" @click.stop>
+                            <div class="time-picker__columns">
+                                <div class="time-picker__column">
+                                    <button
+                                        v-for="hour in hours"
+                                        :key="'h-' + hour"
+                                        type="button"
+                                        class="time-picker__item"
+                                        :class="{ active: tempHour === hour }"
+                                        @click="selectHour(hour)"
+                                    >{{ hour }}</button>
+                                </div>
+                                <div class="time-picker__column">
+                                    <button
+                                        v-for="minute in minutes"
+                                        :key="'m-' + minute"
+                                        type="button"
+                                        class="time-picker__item"
+                                        :class="{ active: tempMinute === minute }"
+                                        @click="selectMinute(minute)"
+                                    >{{ minute }}</button>
+                                </div>
+                            </div>
+                            <div class="time-picker__actions">
+                                <button type="button" class="time-picker__action" @click="setNow">此刻</button>
+                                <button type="button" class="time-picker__action time-picker__confirm" @click="confirm">确定</button>
+                            </div>
+                        </div>
+                    </transition>
+                </div>
+            `
+        };
+
         createApp({
             components: {
-                AppSelect
+                AppSelect,
+                TimePicker
             },
             setup() {
                 const aliyunRegions = [
@@ -3122,11 +3865,19 @@
                     siteType: 'international',
                     maxTraffic: 200,
                     remark: '',
+                    scheduleEnabled: false,
+                    scheduleStartEnabled: false,
+                    scheduleStopEnabled: false,
+                    startTime: '',
+                    stopTime: '',
+                    scheduleBlockedByTraffic: false,
                     usageUsed: 0,
                     usageRemaining: 200,
                     usagePercent: 0,
                     instanceCount: 0,
-                    usageLastUpdated: ''
+                    usageLastUpdated: '',
+                    trafficStatus: 'ok',
+                    trafficMessage: ''
                 });
 
                 const createDefaultConfig = () => ({
@@ -3168,7 +3919,9 @@
                             proxy_ip: '',
                             proxy_port: '',
                             proxy_user: '',
-                            proxy_pass: ''
+                            proxy_pass: '',
+                            allowed_user_ids: '',
+                            confirm_ttl: 60
                         },
                         webhook: {
                             enabled: false,
@@ -3215,6 +3968,7 @@
                 const allInstances = ref([]);
                 const systemLogs = ref([]);
                 const initialized = ref(true);
+
                 const loadingCheckInit = ref(true);
                 const loading = ref(true);
                 const checkingLogin = ref(true);
@@ -3237,6 +3991,7 @@
                 const refreshingInstanceIds = ref([]);
                 const accountSyncStates = ref({});
                 const accountSyncResults = ref({});
+                const scheduleRestoreStates = ref({});
                 const configBaseline = ref('');
                 const toasts = ref([]);
                 const dialogState = ref({
@@ -3250,6 +4005,8 @@
                 });
                 const showAccountModal = ref(false);
                 const savingAccountModal = ref(false);
+                const testingAccountDraft = ref(false);
+                const accountDraftTestResult = ref(null);
                 const accountModalMode = ref('create');
                 const editingAccountIndex = ref(-1);
                 const accountDraft = ref(createDefaultAccount());
@@ -3293,6 +4050,20 @@
 
                     const mb = traffic * 1024;
                     return `${mb.toFixed(2).replace(/\.00$/, '')} MB`;
+                };
+                const hasTrafficIssue = (item) => {
+                    const status = item?.trafficStatus || 'ok';
+                    return status !== '' && status !== 'ok';
+                };
+                const trafficIssueText = (item) => {
+                    const status = item?.trafficStatus || 'ok';
+                    const message = (item?.trafficMessage || '').trim();
+                    if (message) return message;
+                    if (status === 'permission_denied') return '缺少云监控权限';
+                    if (status === 'auth_error') return '云监控鉴权失败';
+                    if (status === 'timeout') return '云监控请求超时';
+                    if (status === 'partial') return '部分实例流量同步失败';
+                    return '流量同步失败';
                 };
                 const formatCurrencyValue = (value, currency = 'CNY') => {
                     const amount = Number(value ?? 0);
@@ -3417,6 +4188,11 @@
                     const account = config.value.Accounts[index];
                     if (!account) return false;
                     return !!accountSyncStates.value[getAccountKey(account, index)];
+                };
+                const isRestoringScheduleBlock = (index) => {
+                    const account = config.value.Accounts[index];
+                    if (!account) return false;
+                    return !!scheduleRestoreStates.value[getAccountKey(account, index)];
                 };
                 const getAccountSyncLabel = (index) => {
                     if (isSyncingAccount(index)) return '同步中...';
@@ -3901,6 +4677,8 @@
                         const refreshed = statusInstances.value.find((item) => item.id === id);
                         if (data.billing_error) {
                             openAlert(`实例已刷新，账单查询异常：${data.billing_error}`, 'info');
+                        } else if (refreshed && hasTrafficIssue(refreshed)) {
+                            openAlert(`实例已刷新，${trafficIssueText(refreshed)}`, 'info');
                         } else if (refreshed) {
                             openAlert(`实例已刷新，当前流量 ${formatTrafficValue(refreshed.flow_used)}`, 'success');
                         } else {
@@ -4102,10 +4880,57 @@
                     }
                 };
 
+                const restoreScheduleBlock = async (index) => {
+                    const account = config.value.Accounts[index];
+                    if (!account) return;
+
+                    if (!account.groupKey) {
+                        openAlert('账号信息不完整，请先保存账号后再恢复。', 'error');
+                        return;
+                    }
+
+                    const confirmed = await askConfirm('确定恢复该账号的定时开关机吗？如果本月流量仍然超过阈值，下一轮监控会再次触发保护并暂停定时任务。', {
+                        title: '恢复定时开关机',
+                        confirmLabel: '确认恢复'
+                    });
+                    if (!confirmed) return;
+
+                    const key = getAccountKey(account, index);
+                    scheduleRestoreStates.value = { ...scheduleRestoreStates.value, [key]: true };
+
+                    try {
+                        const res = await fetch('index.php?action=restore_schedule_block', {
+                            method: 'POST',
+                            body: JSON.stringify({ groupKey: account.groupKey })
+                        });
+                        const data = await res.json();
+
+                        if (!res.ok || !data.success) {
+                            openAlert(data.message || '恢复失败', 'error');
+                            return;
+                        }
+
+                        await fetchConfig();
+                        if (accountModalMode.value === 'edit' && editingAccountIndex.value > -1) {
+                            accountDraft.value = {
+                                ...createDefaultAccount(),
+                                ...(config.value.Accounts[editingAccountIndex.value] || {})
+                            };
+                        }
+                        openAlert(data.message || '定时开关机已恢复', 'success');
+                    } catch (error) {
+                        console.error('Restore schedule failed', error);
+                        openAlert('恢复请求失败，请稍后重试', 'error');
+                    } finally {
+                        scheduleRestoreStates.value = { ...scheduleRestoreStates.value, [key]: false };
+                    }
+                };
+
                 const openCreateAccountModal = () => {
                     accountModalMode.value = 'create';
                     editingAccountIndex.value = -1;
                     accountDraft.value = createDefaultAccount();
+                    accountDraftTestResult.value = null;
                     showAccountModal.value = true;
                 };
 
@@ -4116,12 +4941,15 @@
                         ...createDefaultAccount(),
                         ...(config.value.Accounts[index] || {})
                     };
+                    accountDraftTestResult.value = null;
                     showAccountModal.value = true;
                 };
 
                 const closeAccountModal = () => {
                     showAccountModal.value = false;
                     savingAccountModal.value = false;
+                    testingAccountDraft.value = false;
+                    accountDraftTestResult.value = null;
                     editingAccountIndex.value = -1;
                     accountDraft.value = createDefaultAccount();
                 };
@@ -4131,6 +4959,20 @@
                     if (!draft.remark || !draft.AccessKeyId || !draft.AccessKeySecret || !draft.regionId || !draft.maxTraffic) {
                         openAlert('请填写完整的账号信息，包括备注、AK、区域和账号流量。', 'error');
                         return false;
+                    }
+                    if (draft.scheduleEnabled) {
+                        if (!draft.scheduleStartEnabled && !draft.scheduleStopEnabled) {
+                            openAlert('已开启定时开关机，请至少启用一个定时动作。', 'error');
+                            return false;
+                        }
+                        if (draft.scheduleStartEnabled && !draft.startTime) {
+                            openAlert('请填写定时开机时间。', 'error');
+                            return false;
+                        }
+                        if (draft.scheduleStopEnabled && !draft.stopTime) {
+                            openAlert('请填写定时停机时间。', 'error');
+                            return false;
+                        }
                     }
                     return true;
                 };
@@ -4143,6 +4985,13 @@
                         ...createDefaultAccount(),
                         ...accountDraft.value
                     };
+
+                    if (!draft.scheduleEnabled) {
+                        draft.scheduleStartEnabled = false;
+                        draft.scheduleStopEnabled = false;
+                        draft.startTime = '';
+                        draft.stopTime = '';
+                    }
 
                     if (accountModalMode.value === 'edit' && editingAccountIndex.value > -1) {
                         nextAccounts.splice(editingAccountIndex.value, 1, draft);
@@ -4160,6 +5009,43 @@
 
                     config.value.Accounts = previousAccounts;
                     savingAccountModal.value = false;
+                };
+
+                const testAccountDraft = async () => {
+                    if (!validateAccountDraft()) return;
+                    testingAccountDraft.value = true;
+                    accountDraftTestResult.value = null;
+                    try {
+                        const res = await fetch('index.php?action=test_account', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ account: accountDraft.value })
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.success) {
+                            accountDraftTestResult.value = {
+                                success: false,
+                                message: data.message || '账号测试失败',
+                                monitorStatus: 'warning',
+                                monitorMessage: data.message || '账号测试失败'
+                            };
+                            openAlert(data.message || '账号测试失败', 'error');
+                            return;
+                        }
+                        accountDraftTestResult.value = data;
+                        openAlert(data.monitorStatus === 'warning' ? '账号测试完成，云监控权限待补充' : '账号测试通过', data.monitorStatus === 'warning' ? 'info' : 'success');
+                    } catch (error) {
+                        console.error('Test account failed', error);
+                        accountDraftTestResult.value = {
+                            success: false,
+                            message: '账号测试请求失败，请稍后重试',
+                            monitorStatus: 'warning',
+                            monitorMessage: '账号测试请求失败，请稍后重试'
+                        };
+                        openAlert('账号测试请求失败，请稍后重试', 'error');
+                    } finally {
+                        testingAccountDraft.value = false;
+                    }
                 };
 
                 const openCreateEcsModal = () => {
@@ -4632,9 +5518,11 @@
                     currentMenu,
                     currentNotifyTab,
                     accountDraft,
+                    accountDraftTestResult,
                     accountModalMode,
                     accountSyncResults,
                     accountSyncStates,
+                    scheduleRestoreStates,
                     fetchingAllInstances,
                     syncingInstances,
                     filteredManagedInstances,
@@ -4651,6 +5539,7 @@
                     passwordInput,
                     reloadPage,
                     savingAccountModal,
+                    testingAccountDraft,
                     ecsCreateConfirmed,
                     ecsCreateDraft,
                     ecsCreatePreview,
@@ -4684,10 +5573,14 @@
                     formatTrafficUsage,
                     diskUnitText,
                     diskCategoryText,
+                    hasTrafficIssue,
+                    trafficIssueText,
+                    getAccountSyncResult,
                     getAccountSyncLabel,
                     getAccountSyncButtonClass,
                     getSiteTypeLabel,
                     isSyncingAccount,
+                    isRestoringScheduleBlock,
                     isRefreshingInstance,
                     copyCredential,
                     buildCredentialCopyText,
@@ -4702,10 +5595,12 @@
                     confirmCreateEcs,
                     canReplaceIp,
                     saveAccountModal,
+                    testAccountDraft,
                     statusClass,
                     statusText,
                     logTypeLabel,
                     syncAccount,
+                    restoreScheduleBlock,
                     toasts,
                     getRegionName,
                     toggleAdmin,

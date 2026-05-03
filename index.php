@@ -228,6 +228,22 @@ if ($action === 'sync_account_group') {
     exit;
 }
 
+if ($action === 'restore_schedule_block') {
+    header('Content-Type: application/json; charset=utf-8');
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+    try {
+        echo json_encode($app->restoreScheduleAfterTrafficBlock($data['groupKey'] ?? ''));
+    } catch (Exception $e) {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'message' => $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
 if ($action === 'preview_ecs_create') {
     header('Content-Type: application/json; charset=utf-8');
     $data = json_decode(file_get_contents('php://input'), true) ?: [];
