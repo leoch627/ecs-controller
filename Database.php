@@ -205,6 +205,21 @@ class Database
             created_at INTEGER NOT NULL
         )");
 
+        // 实例失效（过期 / 释放 / 被回收 / 换 IP）后待从解析中移除的 IP。失败会在下一轮巡检重试。
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS dns_cleanup_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT NOT NULL,
+            instance_id TEXT DEFAULT '',
+            label TEXT DEFAULT '',
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER DEFAULT 0,
+            message TEXT DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )");
+        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_dns_cleanup_status ON dns_cleanup_tasks (status, id)");
+
         $this->ensureColumn('accounts', 'traffic_used', 'REAL DEFAULT 0');
         $this->ensureColumn('accounts', 'traffic_billing_month', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'instance_status', "TEXT DEFAULT 'Unknown'");
@@ -238,6 +253,9 @@ class Database
         $this->ensureColumn('accounts', 'protection_suspended', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'protection_suspend_reason', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'protection_suspend_notified_at', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'charge_type', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'expired_at', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'expiry_dns_queued_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('ecs_create_tasks', 'public_ip_mode', "TEXT DEFAULT 'ecs_public_ip'");
         $this->ensureColumn('ecs_create_tasks', 'eip_allocation_id', "TEXT DEFAULT ''");
         $this->ensureColumn('ecs_create_tasks', 'eip_address', "TEXT DEFAULT ''");
@@ -624,5 +642,68 @@ class Database
         $stmt->execute([$taskId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
+    }
+
+    /**
+     * 加入一条解析清理任务。同一个 IP 已有待处理任务时不重复加入。
+     */
+    public function enqueueDnsCleanup($ip, $instanceId, $label, $reason)
+    {
+        $ip = trim((string) $ip);
+        if ($ip === '') {
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare("SELECT id FROM dns_cleanup_tasks WHERE ip = ? AND status = 'pending' LIMIT 1");
+        $stmt->execute([$ip]);
+        if ($stmt->fetchColumn()) {
+            return false;
+        }
+
+        $now = time();
+        $stmt = $this->pdo->prepare("
+            INSERT INTO dns_cleanup_tasks (ip, instance_id, label, reason, status, attempts, message, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'pending', 0, '', ?, ?)
+        ");
+        return $stmt->execute([$ip, (string) $instanceId, (string) $label, (string) $reason, $now, $now]);
+    }
+
+    public function getPendingDnsCleanupTasks($limit = 20)
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM dns_cleanup_tasks WHERE status = 'pending' ORDER BY id ASC LIMIT ?");
+        $stmt->execute([(int) $limit]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getDnsCleanupTasks($limit = 50)
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM dns_cleanup_tasks ORDER BY id DESC LIMIT ?");
+        $stmt->execute([(int) $limit]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getDnsCleanupTask($id)
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM dns_cleanup_tasks WHERE id = ? LIMIT 1");
+        $stmt->execute([(int) $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
+    public function updateDnsCleanupTask($id, $status, $message, $incrementAttempts = true)
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE dns_cleanup_tasks
+            SET status = ?, message = ?, attempts = attempts + ?, updated_at = ?
+            WHERE id = ?
+        ");
+        return $stmt->execute([$status, (string) $message, $incrementAttempts ? 1 : 0, time(), (int) $id]);
+    }
+
+    public function pruneDnsCleanupTasks($days = 90)
+    {
+        $limit = time() - ($days * 86400);
+        $stmt = $this->pdo->prepare("DELETE FROM dns_cleanup_tasks WHERE status <> 'pending' AND updated_at < ?");
+        $stmt->execute([$limit]);
     }
 }

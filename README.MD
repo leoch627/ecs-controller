@@ -20,6 +20,10 @@
 
 ## 🆕 最近更新
 
+- **实例失效自动删除解析**：实例到期、被释放、被抢占回收或在控制台删除后，自动把指向它公网 IP 的 A 记录删掉（多 IP 记录只移除这一个）。失败自动重试，处理结果在「域名解析」页可查。
+- **支持 9 家 DNS 服务商**：阿里云、腾讯云 DNSPod、华为云、Cloudflare、AWS Route 53、NameSilo、Porkbun、GoDaddy、DigitalOcean，自动解析和失效清理都可用。
+- **页面秒开**：后台巡检正常时，打开页面只读本地数据，不再现场调用阿里云；各页面数据在后台自动刷新。
+- **界面重新设计**：实例状态和实例管理合并为一个「实例」页，开关机、换 IP、释放都在同一行完成；包年包月到期、流量超线直接标在实例上；设置分页签并带保存提示；适配手机。
 - 新增页面 Logo 自定义，支持本地上传或填写图片地址。
 - 优化一键创建 ECS：支持公网 IP 类型、硬盘类型、系统盘大小校验与更换公网 IP。
 - 优化释放中实例展示、前后端状态联动和移动端浮窗/表单体验。
@@ -152,6 +156,24 @@ cdt:ListCdtInternetTraffic
 
 如果不需要消费情况展示，可以去掉 `bssapi:*` 相关权限。
 
+### DNS 服务商凭据（可选）
+
+使用自动解析或失效清理时，在「域名解析」页选择域名所在的服务商并填写凭据，点「测试连接」即可验证。各家需要的权限：
+
+| 服务商 | 凭据 | 需要的权限 |
+|---|---|---|
+| 阿里云 | AccessKey ID / Secret | RAM 授予 `AliyunDNSFullAccess` |
+| 腾讯云 DNSPod | SecretId / SecretKey（访问管理 → API 密钥，不是旧版 DNSPod Token） | CAM 授予 `QcloudDNSPodFullAccess` |
+| 华为云 | AK / SK | IAM 授予 `DNS FullAccess`，或 `dns:zone:list`、`dns:recordset:list/create/update/delete` |
+| Cloudflare | API Token | Zone · DNS · Edit 和 Zone · Zone · Read |
+| AWS Route 53 | Access Key ID / Secret | `route53:ListHostedZones`、`route53:ListResourceRecordSets`、`route53:ChangeResourceRecordSets` |
+| NameSilo | API Key | 非只读 Key；设置了 IP 白名单要加入服务器 IP。TTL 最低 3600 秒 |
+| Porkbun | API Key / Secret API Key | 在域名设置里打开「API Access」 |
+| GoDaddy | API Key / Secret | Production Key；GoDaddy 只对 10 个以上域名或订阅 Discount Domain Club 的账号开放 API |
+| DigitalOcean | Personal Access Token | domain 的 read / create / update / delete |
+
+填写根域名后只处理该域名下的记录；留空则处理该服务商账号下的全部域名。Route 53 中带路由策略或别名的记录不会被修改。
+
 ---
 
 ## ✨ 核心功能
@@ -170,7 +192,8 @@ cdt:ListCdtInternetTraffic
 - **ECS 快速创建**：支持从预设规格中一键拉起新实例（默认采用最低配置、最低价格方案），并自动配置安全组与防火墙规则。
 - **预检与成本预览**：创建前自动调用阿里云 API 进行库存预检与其费用估算，拒绝盲目下单。
 - **初次登录信息保护**：针对新建实例，系统仅在创建成功的瞬间展示初始密码，确保 AK/SK 与凭据安全。
-- **DDNS 联动**：深度集成 **Cloudflare**，实例重启 IP 变更后自动同步 A 记录。
+- **DDNS 联动**：支持阿里云、腾讯云 DNSPod、华为云、Cloudflare、AWS Route 53、NameSilo、Porkbun、GoDaddy、DigitalOcean，实例创建、启动、更换 IP 后自动同步 A 记录。
+- **失效实例解析清理**：实例到期 / 释放 / 被回收后自动删除指向其 IP 的解析；"实例消失"会按 ID 二次确认，IP 仍被其他在用实例使用时跳过。
 
 ### 📊 成本与审计
 - **费用中心**：实时拉取账号 **可用余额**，并预估当月实例已产生账单金额。

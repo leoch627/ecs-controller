@@ -29,7 +29,7 @@ class AliyunTrafficCheck
             $this->configManager = new ConfigManager($this->db);
             $this->aliyunService = new AliyunService();
             $this->notificationService = new NotificationService();
-            $this->ddnsService = new DdnsService($this->configManager->getAllSettings());
+            $this->ddnsService = new DdnsService($this->configManager->getServiceSettings());
 
             // 注入配置到通知服务
             $this->notificationService->setConfig($this->configManager->getAllSettings());
@@ -201,6 +201,7 @@ class AliyunTrafficCheck
         $success = $this->configManager->updateConfig($data);
         if ($success) {
             $this->notificationService->setConfig($this->configManager->getAllSettings());
+            $this->ddnsService = new DdnsService($this->configManager->getServiceSettings());
         }
         return $success;
     }
@@ -266,7 +267,7 @@ class AliyunTrafficCheck
         $settings = $this->configManager->getAllSettings();
         $accountGroups = $this->configManager->getAccountGroups();
         $groupMetrics = $this->configManager->getAccountGroupMetrics();
-        $billingMetrics = $this->getAccountGroupBillingMetrics();
+        $billingMetrics = $this->getAccountGroupBillingMetrics(false, $this->isMonitorHealthy());
 
         $config = [
             'admin_password' => !empty($settings['admin_password']) ? '********' : '',
@@ -313,14 +314,12 @@ class AliyunTrafficCheck
             ],
             'Ddns' => [
                 'enabled' => ($settings['ddns_enabled'] ?? '0') === '1',
-                'provider' => $settings['ddns_provider'] ?? 'cloudflare',
+                'cleanup_enabled' => ($settings['dns_cleanup_enabled'] ?? '0') === '1',
+                'provider' => DnsProviderRegistry::normalizeId($settings['ddns_provider'] ?? ''),
                 'domain' => $settings['ddns_domain'] ?? '',
-                'cloudflare' => [
-                    'zone_id' => $settings['ddns_cf_zone_id'] ?? '',
-                    'token' => !empty($settings['ddns_cf_token']) ? '********' : '',
-                    'proxied' => ($settings['ddns_cf_proxied'] ?? '0') === '1'
-                ]
+                'credentials' => DnsProviderRegistry::maskedCredentials($this->configManager->getServiceSettings())
             ],
+            'DnsProviders' => DnsProviderRegistry::schema(),
             'Accounts' => []
         ];
 
@@ -488,6 +487,7 @@ class AliyunTrafficCheck
             // 普通/重要日志保留 30 天，高频心跳日志仅保留 3 天
             $this->db->pruneLogs(30, 3);
             $this->db->pruneStats();
+            $this->db->pruneDnsCleanupTasks(90);
 
             // 每天凌晨 04:00 执行一次 VACUUM 整理数据库碎片
             if (date('H') === '04') {
@@ -504,6 +504,9 @@ class AliyunTrafficCheck
         $keepAlive = $this->configManager->get('keep_alive', '0') === '1';
         $monthlyAutoStart = $this->configManager->get('monthly_auto_start', '0') === '1';
         $userInterval = (int) $this->configManager->get('api_interval', 600);
+
+        // 定期从阿里云拉取实例清单：没人打开页面时也能发现过期 / 被回收的实例，并同步解析。
+        $this->syncInventoryIfDue($userInterval);
 
         $accounts = $this->configManager->getAccounts();
 
@@ -750,6 +753,14 @@ class AliyunTrafficCheck
         // 执行异步彻底销毁循环
         $this->processPendingReleases();
 
+        // 把已失效实例的 IP 从解析中移除
+        $this->processDnsCleanupQueue();
+
+        // 费用数据由巡检在后台刷新（缓存 6 小时），页面只读缓存
+        if ((int) date('i') % 10 === 0) {
+            $this->refreshBillingCaches();
+        }
+
         // 账号池轮换检查
         $rotationConfig = $this->configManager->getRotationConfig();
         if ($rotationConfig['enabled']) {
@@ -775,7 +786,12 @@ class AliyunTrafficCheck
         if ($this->initError)
             return ['error' => $this->initError];
 
-        $this->configManager->syncAccountGroups();
+        // 巡检正常时，实例清单、流量、状态和费用都由后台巡检刷新，页面只读数据库，打开页面不再等阿里云接口。
+        // 巡检停了才退回到页面打开时现查，保证没配 cron 的部署也能看到数据。
+        $allowRemote = !$this->isMonitorHealthy();
+        if ($allowRemote) {
+            $this->configManager->syncAccountGroups();
+        }
 
         $data = [];
         $threshold = (int) $this->configManager->get('traffic_threshold', 95);
@@ -786,12 +802,12 @@ class AliyunTrafficCheck
         }));
 
         foreach ($accounts as $account) {
-            $data[] = $this->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive);
+            $data[] = $this->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive, false, $allowRemote);
         }
 
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
-            $snap = $this->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive);
+            $snap = $this->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive, false, $allowRemote);
             $snap['instanceStatus'] = 'Releasing';
             $snap['status'] = 'Releasing';
             $snap['operationLocked'] = true;
@@ -804,6 +820,7 @@ class AliyunTrafficCheck
             'system_last_run' => $this->configManager->getLastRunTime(),
             'sync_interval' => $userInterval,
             'sensitive_visible' => $includeSensitive,
+            'background_refresh' => !$allowRemote,
             'rotation' => $this->buildRotationStatus()
         ];
     }
@@ -1647,7 +1664,7 @@ class AliyunTrafficCheck
      * 安全获取账户费用摘要信息 (带缓存)
      * 用于实例卡片上显示
      */
-    private function safeGetBillingInfo($account, $billingCycle)
+    private function safeGetBillingInfo($account, $billingCycle, $cacheOnly = false)
     {
         $costInfo = [
             'enabled' => true,
@@ -1659,11 +1676,11 @@ class AliyunTrafficCheck
         ];
 
         // 1. 尝试读取余额缓存
-        $balanceCache = $this->db->getBillingCache($account['id'], 'balance', '', 21600);
+        $balanceCache = $this->db->getBillingCache($account['id'], 'balance', '', $cacheOnly ? 86400 * 7 : 21600);
         if ($balanceCache) {
             $costInfo['balance'] = $balanceCache['AvailableAmount'];
             $costInfo['currency'] = $balanceCache['Currency'] ?? 'CNY';
-        } else {
+        } elseif (!$cacheOnly) {
             try {
                 $balance = $this->aliyunService->getAccountBalance(
                     $account['access_key_id'],
@@ -1680,10 +1697,10 @@ class AliyunTrafficCheck
 
         // 2. 尝试读取实例账单缓存
         if (!empty($account['instance_id'])) {
-            $billCache = $this->db->getBillingCache($account['id'], 'instance_bill', $billingCycle, 21600);
+            $billCache = $this->db->getBillingCache($account['id'], 'instance_bill', $billingCycle, $cacheOnly ? 86400 * 7 : 21600);
             if ($billCache) {
                 $costInfo['monthly_cost'] = $billCache['TotalCost'];
-            } else {
+            } elseif (!$cacheOnly) {
                 try {
                     $bill = $this->aliyunService->getInstanceBill(
                         $account['access_key_id'],
@@ -1708,7 +1725,7 @@ class AliyunTrafficCheck
         return $costInfo;
     }
 
-    private function getAccountGroupBillingMetrics($forceRefresh = false)
+    private function getAccountGroupBillingMetrics($forceRefresh = false, $cacheOnly = false)
     {
         if ($this->configManager->get('enable_billing', '0') !== '1') {
             return [];
@@ -1749,10 +1766,12 @@ class AliyunTrafficCheck
             }
 
             try {
-                $balanceCache = $forceRefresh ? null : $this->db->getBillingCache($row['id'], 'balance', '', 21600);
+                $balanceCache = $forceRefresh ? null : $this->db->getBillingCache($row['id'], 'balance', '', $cacheOnly ? 86400 * 7 : 21600);
                 if ($balanceCache) {
                     $summary['balance'] = $balanceCache['AvailableAmount'] ?? null;
                     $summary['currency'] = $balanceCache['Currency'] ?? $currency;
+                } elseif ($cacheOnly) {
+                    $summary['pending'] = true;
                 } else {
                     $balance = $this->aliyunService->getAccountBalance(
                         $row['access_key_id'],
@@ -1768,9 +1787,11 @@ class AliyunTrafficCheck
             }
 
             try {
-                $overviewCache = $forceRefresh ? null : $this->db->getBillingCache($row['id'], 'bill_overview', $billingCycle, 21600);
+                $overviewCache = $forceRefresh ? null : $this->db->getBillingCache($row['id'], 'bill_overview', $billingCycle, $cacheOnly ? 86400 * 7 : 21600);
                 if ($overviewCache) {
                     $summary['monthly_cost'] = $overviewCache['TotalCost'] ?? null;
+                } elseif ($cacheOnly) {
+                    $summary['pending'] = true;
                 } else {
                     $overview = $this->aliyunService->getBillOverview(
                         $row['access_key_id'],
@@ -1877,6 +1898,9 @@ class AliyunTrafficCheck
 
             $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'EIP 更换后');
             $newIp = $result['publicIp'] ?? '';
+            if ($oldIp !== '' && $oldIp !== $newIp && $this->queueDnsCleanup($oldIp, $targetAccount, 'ip_replaced')) {
+                $this->processDnsCleanupQueue();
+            }
             $this->db->addLog('info', "EIP 已更换 [{$this->getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']} {$oldIp} -> {$newIp}");
             $notifyResult = $this->notificationService->notifyPublicIpChanged(
                 $this->getAccountLogLabel($targetAccount),
@@ -1909,6 +1933,8 @@ class AliyunTrafficCheck
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
             $accountLabel = $this->getAccountLogLabel($account);
+            // 托管 EIP 释放时会清空 IP 字段，先记下来给解析清理用
+            $releasedIp = $this->configManager->effectivePublicIp($account);
             try {
                 $status = $this->aliyunService->getInstanceStatus($account);
             } catch (\Exception $e) {
@@ -1939,6 +1965,7 @@ class AliyunTrafficCheck
                         $this->deleteDdnsForAccount($account, $accountsBeforeDelete, '后台实例彻底释放');
                         $this->configManager->physicallyDeleteAccount($account['id']);
                         $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '异步释放后同步');
+                        $this->queueDnsCleanup($releasedIp, $account, 'released');
                     }
                 } elseif ($status === 'NotFound') {
                     if (!$this->releaseManagedEipForPendingAccount($account, $accountLabel)) {
@@ -1949,6 +1976,7 @@ class AliyunTrafficCheck
                     $this->deleteDdnsForAccount($account, $accountsBeforeDelete, '实例已灭迹后清理');
                     $this->configManager->physicallyDeleteAccount($account['id']);
                     $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '实例灭迹后同步');
+                    $this->queueDnsCleanup($releasedIp, $account, 'vanished');
                 } elseif ($status === 'Unknown') {
                     $this->db->addLog('warning', "后台异步释放引擎暂时无法确认实例状态，将于下一轮重试 [{$accountLabel}]");
                 } elseif (!in_array($status, ['Stopping'])) {
@@ -2016,13 +2044,14 @@ class AliyunTrafficCheck
         }));
         $allInstances = [];
 
+        $allowRemote = $sync || !$this->isMonitorHealthy();
         foreach ($accounts as $account) {
-            $allInstances[] = $this->buildInstanceSnapshot($account, $threshold, $userInterval, false, true, $sync);
+            $allInstances[] = $this->buildInstanceSnapshot($account, $threshold, $userInterval, false, true, $sync, $allowRemote);
         }
 
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
-            $snap = $this->buildInstanceSnapshot($account, $threshold, $userInterval, false, true, $sync);
+            $snap = $this->buildInstanceSnapshot($account, $threshold, $userInterval, false, true, $sync, $allowRemote);
             $snap['instanceStatus'] = 'Releasing';
             $snap['status'] = 'Releasing';
             $snap['operationLocked'] = true;
@@ -2043,7 +2072,8 @@ class AliyunTrafficCheck
 
         foreach ($accounts as $account) {
             $publicIp = $this->getEffectivePublicIp($account);
-            if (empty($account['instance_id']) || $publicIp === '') {
+            // 已到期的实例不再写解析，否则会和失效清理互相覆盖
+            if (empty($account['instance_id']) || $publicIp === '' || $this->isInstanceExpired($account)) {
                 continue;
             }
 
@@ -2121,6 +2151,238 @@ class AliyunTrafficCheck
         }
     }
 
+    // ==================== 失效实例解析清理 ====================
+
+    private function syncInventoryIfDue($userInterval)
+    {
+        $interval = max((int) $userInterval, 300);
+        if ((time() - $this->configManager->getLastInstanceSyncTime()) < $interval) {
+            return;
+        }
+
+        $accountsBeforeSync = $this->configManager->getAccounts();
+        $this->configManager->syncAccountGroups(true);
+        $this->configManager->load();
+        $this->reconcileDdnsAfterAccountSync($accountsBeforeSync, $this->configManager->getAccounts(), '定时巡检');
+    }
+
+    /**
+     * 巡检最近 3 分钟内跑过，说明后台在持续刷新数据，页面可以只读数据库。
+     */
+    private function isMonitorHealthy()
+    {
+        $lastRun = (int) $this->configManager->getLastRunTime();
+        return $lastRun > 0 && (time() - $lastRun) < 180;
+    }
+
+    private function refreshBillingCaches()
+    {
+        if ($this->configManager->get('enable_billing', '0') !== '1') {
+            return;
+        }
+
+        $this->getAccountGroupBillingMetrics();
+        foreach ($this->configManager->getAccounts() as $account) {
+            if (!empty($account['instance_id'])) {
+                $this->safeGetBillingInfo($account, date('Y-m'));
+            }
+        }
+    }
+
+    private function isInstanceExpired(array $account)
+    {
+        $expiredAt = (int) ($account['expired_at'] ?? 0);
+        return ($account['charge_type'] ?? '') === 'PrePaid' && $expiredAt > 0 && $expiredAt <= time();
+    }
+
+    private function dnsCleanupReasonText($reason)
+    {
+        return [
+            'expired' => '包年包月实例已到期',
+            'vanished' => '实例已从阿里云消失（过期释放 / 抢占回收 / 控制台删除）',
+            'released' => '在本系统中释放了实例',
+            'ip_replaced' => '更换了公网 IP，旧 IP 已归还阿里云'
+        ][$reason] ?? $reason;
+    }
+
+    private function queueDnsCleanup($ip, array $account, $reason)
+    {
+        $ip = trim((string) $ip);
+        if ($ip === '' || $this->configManager->get('dns_cleanup_enabled', '0') !== '1') {
+            return false;
+        }
+
+        $label = $this->getAccountLogLabel($account);
+        $instanceName = trim((string) ($account['instance_name'] ?? ''));
+        if ($instanceName !== '' && $instanceName !== $label) {
+            $label .= ' / ' . $instanceName;
+        }
+
+        $queued = $this->db->enqueueDnsCleanup($ip, $account['instance_id'] ?? '', $label, $reason);
+        if ($queued) {
+            $this->db->addLog('info', "已加入解析清理队列 [{$label}] {$ip}（{$this->dnsCleanupReasonText($reason)}）");
+        }
+        return $queued;
+    }
+
+    /**
+     * 返回仍在正常使用该 IP 的实例标签；为空表示 IP 已经不属于任何有效实例，可以安全清理。
+     */
+    private function findActiveInstanceUsingIp($ip)
+    {
+        foreach ($this->configManager->getAccounts() as $account) {
+            if (empty($account['instance_id']) || $this->isInstanceExpired($account)) {
+                continue;
+            }
+            if ($this->configManager->effectivePublicIp($account) === $ip) {
+                return $this->getAccountLogLabel($account) . ' ' . $account['instance_id'];
+            }
+        }
+        return '';
+    }
+
+    private function processDnsCleanupQueue($onlyTaskId = 0)
+    {
+        $tasks = $onlyTaskId > 0
+            ? array_filter([$this->db->getDnsCleanupTask($onlyTaskId)])
+            : $this->db->getPendingDnsCleanupTasks(10);
+        if (empty($tasks)) {
+            return;
+        }
+
+        if ($this->configManager->get('dns_cleanup_enabled', '0') !== '1') {
+            foreach ($tasks as $task) {
+                $this->db->updateDnsCleanupTask($task['id'], 'skipped', '解析清理已关闭，未处理', false);
+            }
+            return;
+        }
+
+        if (!$this->ddnsService || !$this->ddnsService->isCleanupEnabled()) {
+            // 开关已开但服务商没配好：保持排队，配置完成后自动处理
+            return;
+        }
+
+        $maxAttempts = 10;
+        foreach ($tasks as $task) {
+            $ip = $task['ip'];
+            $reasonText = $this->dnsCleanupReasonText($task['reason']);
+
+            $activeUser = $this->findActiveInstanceUsingIp($ip);
+            if ($activeUser !== '') {
+                $this->db->updateDnsCleanupTask($task['id'], 'skipped', "IP 仍被实例 {$activeUser} 使用，已跳过", false);
+                $this->db->addLog('info', "解析清理已跳过 {$ip}：仍被实例 {$activeUser} 使用");
+                continue;
+            }
+
+            try {
+                $result = $this->ddnsService->removeIpFromRecords($ip);
+                if (empty($result['success'])) {
+                    throw new Exception($result['message'] ?? '未知错误');
+                }
+
+                $this->db->updateDnsCleanupTask($task['id'], 'done', $result['message']);
+                $this->db->addLog('info', "解析清理完成 [{$task['label']}] {$ip}：{$result['message']}");
+                if (!empty($result['changes'])) {
+                    $notifyResult = $this->notificationService->notifyDnsCleanup($task['label'], $ip, $reasonText, true, $result['message']);
+                    $this->logNotificationResult($notifyResult, $task['label'] ?: $ip);
+                }
+            } catch (\Exception $e) {
+                $message = strip_tags($e->getMessage());
+                $attempts = (int) $task['attempts'] + 1;
+                $finalFailure = $attempts >= $maxAttempts;
+                $this->db->updateDnsCleanupTask($task['id'], $finalFailure ? 'failed' : 'pending', $message);
+                $this->db->addLog('warning', "解析清理失败 [{$task['label']}] {$ip}（第 {$attempts} 次）：{$message}");
+                if ($finalFailure) {
+                    $notifyResult = $this->notificationService->notifyDnsCleanup($task['label'], $ip, $reasonText, false, "重试 {$maxAttempts} 次仍失败：{$message}");
+                    $this->logNotificationResult($notifyResult, $task['label'] ?: $ip);
+                }
+            }
+        }
+    }
+
+    public function getDnsCleanupTasks()
+    {
+        if ($this->initError) {
+            return [];
+        }
+
+        return array_map(function ($task) {
+            return [
+                'id' => (int) $task['id'],
+                'ip' => $task['ip'],
+                'instanceId' => $task['instance_id'],
+                'label' => $task['label'],
+                'reason' => $task['reason'],
+                'reasonText' => $this->dnsCleanupReasonText($task['reason']),
+                'status' => $task['status'],
+                'attempts' => (int) $task['attempts'],
+                'message' => $task['message'],
+                'createdAt' => date('Y-m-d H:i', (int) $task['created_at']),
+                'updatedAt' => date('Y-m-d H:i', (int) $task['updated_at'])
+            ];
+        }, $this->db->getDnsCleanupTasks(50));
+    }
+
+    public function retryDnsCleanupTask($id)
+    {
+        if ($this->initError) {
+            throw new Exception($this->initError);
+        }
+
+        $task = $this->db->getDnsCleanupTask($id);
+        if (!$task) {
+            throw new Exception('清理记录不存在');
+        }
+
+        $this->db->updateDnsCleanupTask($task['id'], 'pending', '手动重试中', false);
+        $this->processDnsCleanupQueue((int) $task['id']);
+        $task = $this->db->getDnsCleanupTask($id);
+        if ($task['status'] === 'pending' && $task['message'] === '手动重试中') {
+            $this->db->updateDnsCleanupTask($task['id'], 'pending', '解析服务商未配置完整，任务继续排队', false);
+            $task['message'] = '解析服务商未配置完整，任务继续排队';
+        }
+
+        return [
+            'success' => $task['status'] === 'done',
+            'status' => $task['status'],
+            'message' => $task['message'] ?: '已处理'
+        ];
+    }
+
+    /**
+     * 用表单里尚未保存的解析配置测试连通性。掩码字段沿用已保存的值。
+     */
+    public function testDnsSettings($ddns)
+    {
+        if ($this->initError) {
+            throw new Exception($this->initError);
+        }
+
+        $ddns = is_array($ddns) ? $ddns : [];
+        $settings = $this->configManager->getServiceSettings();
+        $provider = DnsProviderRegistry::normalizeId($ddns['provider'] ?? '');
+        $settings['ddns_provider'] = $provider;
+        $settings['ddns_domain'] = trim((string) ($ddns['domain'] ?? ''));
+
+        // 用表单里的值覆盖已保存的值；掩码 ******** 表示沿用已保存的密钥
+        $class = DnsProviderRegistry::classes()[$provider];
+        $draft = is_array($ddns['credentials'][$provider] ?? null) ? $ddns['credentials'][$provider] : [];
+        foreach ($class::fields() as $field) {
+            $key = DnsProviderRegistry::settingKey($provider, $field['key']);
+            $value = $draft[$field['key']] ?? null;
+            if ($field['type'] === 'switch') {
+                $settings[$key] = !empty($value) ? '1' : '0';
+            } elseif (!($field['type'] === 'secret' && trim((string) $value) === '********')) {
+                $settings[$key] = trim((string) $value);
+            }
+        }
+
+        $service = new DdnsService($settings);
+        $result = $service->testConnection();
+        $result['scope'] = $service->describeCleanupScope();
+        return $result;
+    }
+
     private function getDdnsRecordNamesForAccounts(array $accounts)
     {
         $groupCounts = $this->getDdnsGroupCounts($accounts);
@@ -2186,7 +2448,7 @@ class AliyunTrafficCheck
         return trim((string) ($account['remark'] ?? ''));
     }
 
-    private function buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive = true, $forceRefresh = false)
+    private function buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive = true, $forceRefresh = false, $allowRemote = true)
     {
         $currentTime = time();
         $lastUpdate = (int) ($account['updated_at'] ?? 0);
@@ -2198,7 +2460,7 @@ class AliyunTrafficCheck
         $isTransientState = in_array($cachedStatus, ['Starting', 'Stopping', 'Pending', 'Unknown'], true);
         $checkInterval = $isTransientState ? 60 : $userInterval;
 
-        if ($forceRefresh || ($currentTime - $lastUpdate) > $checkInterval) {
+        if ($forceRefresh || ($allowRemote && ($currentTime - $lastUpdate) > $checkInterval)) {
             $trafficResult = $this->safeGetTraffic($account);
             $status = $this->safeGetInstanceStatus($account);
 
@@ -2295,11 +2557,14 @@ class AliyunTrafficCheck
             'eipManaged' => !empty($account['eip_managed']),
             'privateIp' => $includeSensitive ? ($account['private_ip'] ?? '') : '',
             'maxTraffic' => $maxTraffic,
-            'siteType' => $account['site_type'] ?? 'international'
+            'siteType' => $account['site_type'] ?? 'international',
+            'chargeType' => $account['charge_type'] ?? '',
+            'expiredAt' => (int) ($account['expired_at'] ?? 0) > 0 ? date('Y-m-d H:i', (int) $account['expired_at']) : '',
+            'expired' => $this->isInstanceExpired($account)
         ];
 
         if ($billingEnabled) {
-            $item['cost'] = $this->safeGetBillingInfo($account, date('Y-m'));
+            $item['cost'] = $this->safeGetBillingInfo($account, date('Y-m'), !$allowRemote && !$forceRefresh);
         }
 
         return $item;
