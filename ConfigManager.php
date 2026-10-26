@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/dns/DnsProviderRegistry.php';
+
 class ConfigManager
 {
     private $database;
@@ -360,9 +362,13 @@ class ConfigManager
                 $this->saveNotificationSettings($data['Notification']);
             }
 
+            $previousGroups = $this->getAccountGroups();
             $groups = $this->normalizeAccountGroups($data['Accounts'] ?? []);
             $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
-            $this->syncAccountGroups(true, $groups);
+            // 只改系统设置时不必重新拉取所有账号的实例，避免保存一次要等几十秒
+            if ($this->accountGroupsChanged($previousGroups, $groups)) {
+                $this->syncAccountGroups(true, $groups);
+            }
 
             $this->db->commit();
             $this->load();
@@ -468,6 +474,9 @@ class ConfigManager
             WHERE id = ?
         ");
 
+        $cleanupEnabled = ($this->configCache['dns_cleanup_enabled'] ?? '0') === '1';
+        $expiryStmt = $this->db->prepare("UPDATE accounts SET charge_type = ?, expired_at = ?, expiry_dns_queued_at = ? WHERE id = ?");
+
         foreach ($groups as $group) {
             $configuredGroupKeys[] = $group['groupKey'];
 
@@ -555,13 +564,37 @@ class ConfigManager
                         $instance['stoppedMode'] ?? ''
                     ]);
                 }
+
+                $rowId = $existingRow ? (int) $existingRow['id'] : (int) $this->db->lastInsertId();
+                $currentIp = $this->effectivePublicIp([
+                    'public_ip_mode' => $networkMeta['public_ip_mode'],
+                    'eip_address' => $networkMeta['eip_address'],
+                    'public_ip' => $instance['publicIp'] ?? ''
+                ]);
+                $label = trim((string) ($instance['instanceName'] ?? '')) ?: $remark;
+                $this->trackInstanceExpiry($expiryStmt, $rowId, $instance, $existingRow, $cleanupEnabled, $label, $currentIp);
             }
 
             if (!empty($existingByGroup[$group['groupKey']])) {
                 foreach ($existingByGroup[$group['groupKey']] as $row) {
-                    if (!in_array($row['instance_id'], $remoteInstanceIds, true)) {
-                        $deleteStmt = $this->db->prepare("DELETE FROM accounts WHERE id = ?");
-                        $deleteStmt->execute([$row['id']]);
+                    if (in_array($row['instance_id'], $remoteInstanceIds, true)) {
+                        continue;
+                    }
+
+                    // is_deleted = 2 是本系统已释放完成的记录，解析在释放时已经清理过。
+                    if ((int) ($row['is_deleted'] ?? 0) !== 2 && !$this->confirmInstanceGone($service, $group, $row)) {
+                        continue;
+                    }
+
+                    $deleteStmt = $this->db->prepare("DELETE FROM accounts WHERE id = ?");
+                    $deleteStmt->execute([$row['id']]);
+
+                    if ((int) ($row['is_deleted'] ?? 0) !== 2) {
+                        $label = trim((string) ($row['instance_name'] ?? '')) ?: ($row['remark'] ?? $row['instance_id']);
+                        $this->database->addLog('warning', "实例已从阿里云消失（过期释放、抢占回收或在控制台删除）[{$label}] {$row['instance_id']}");
+                        if ($cleanupEnabled) {
+                            $this->database->enqueueDnsCleanup($this->effectivePublicIp($row), $row['instance_id'], $label, 'vanished');
+                        }
                     }
                 }
             }
@@ -579,6 +612,84 @@ class ConfigManager
 
         $this->updateLastInstanceSyncTime(time());
         $this->load();
+    }
+
+    private function accountGroupsChanged(array $before, array $after)
+    {
+        $fingerprint = function (array $groups) {
+            return json_encode(array_map(function ($group) {
+                unset($group['scheduleBlockedByTraffic']);
+                ksort($group);
+                return $group;
+            }, $groups));
+        };
+        return $fingerprint($before) !== $fingerprint($after);
+    }
+
+    /**
+     * 列表里没有这台实例时，再按 ID 精确查一次。只有确认不存在才返回 true；查询失败视为无法确认，保留记录下次再试。
+     */
+    private function confirmInstanceGone(AliyunService $service, array $group, array $row)
+    {
+        try {
+            return !$service->instanceExists($group['AccessKeyId'], $group['AccessKeySecret'], $group['regionId'], $row['instance_id']);
+        } catch (Exception $e) {
+            $this->database->addLog('warning', "实例存在性复核失败，暂不移除 [{$row['instance_id']}]: " . strip_tags($e->getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * 记录包年包月实例的到期时间；到期后把它的公网 IP 加入解析清理队列（每次到期只加一次，续费后重置）。
+     */
+    private function trackInstanceExpiry($stmt, $rowId, array $instance, $existingRow, $cleanupEnabled, $label, $ip)
+    {
+        if ($rowId <= 0) {
+            return;
+        }
+
+        $chargeType = (string) ($instance['chargeType'] ?? '');
+        $expiredAt = $chargeType === 'PrePaid' ? (int) strtotime((string) ($instance['expiredTime'] ?? '')) : 0;
+        $queuedAt = (int) ($existingRow['expiry_dns_queued_at'] ?? 0);
+
+        if ($expiredAt > 0 && $expiredAt <= time()) {
+            if ($queuedAt === 0 && $cleanupEnabled) {
+                if ($ip !== '' && $this->database->enqueueDnsCleanup($ip, $instance['instanceId'] ?? '', $label, 'expired')) {
+                    $this->database->addLog('warning', "包年包月实例已到期，公网 IP 已加入解析清理队列 [{$label}] {$ip}");
+                }
+                $queuedAt = time();
+            }
+        } else {
+            $queuedAt = 0;
+        }
+
+        $stmt->execute([$chargeType, $expiredAt, $queuedAt, $rowId]);
+    }
+
+    public function effectivePublicIp(array $row)
+    {
+        if (($row['public_ip_mode'] ?? '') === 'eip') {
+            $eip = trim((string) ($row['eip_address'] ?? ''));
+            if ($eip !== '') {
+                return $eip;
+            }
+        }
+        $eip = trim((string) ($row['eip_address'] ?? ''));
+        return trim((string) ($row['public_ip'] ?? '')) ?: $eip;
+    }
+
+    /**
+     * 供各个外部服务使用的配置：在原始配置基础上解密保存时加密过的密钥。
+     */
+    public function getServiceSettings()
+    {
+        $settings = $this->configCache;
+        foreach (DnsProviderRegistry::secretSettingKeys() as $key) {
+            if (!empty($settings[$key])) {
+                $settings[$key] = $this->decryptValue($settings[$key]);
+            }
+        }
+        return $settings;
     }
 
     public function updateAppLogoUrl($url)
@@ -632,18 +743,32 @@ class ConfigManager
 
     private function saveDdnsSettings($ddns)
     {
-        $cloudflare = is_array($ddns['cloudflare'] ?? null) ? $ddns['cloudflare'] : [];
         $this->saveSetting('ddns_enabled', !empty($ddns['enabled']) ? '1' : '0');
-        $this->saveSetting('ddns_provider', $ddns['provider'] ?? 'cloudflare');
+        $this->saveSetting('dns_cleanup_enabled', !empty($ddns['cleanup_enabled']) ? '1' : '0');
+        $this->saveSetting('ddns_provider', DnsProviderRegistry::normalizeId($ddns['provider'] ?? ''));
         $this->saveSetting('ddns_domain', trim((string) ($ddns['domain'] ?? '')));
-        $this->saveSetting('ddns_cf_zone_id', trim((string) ($cloudflare['zone_id'] ?? '')));
 
-        $token = $cloudflare['token'] ?? '';
-        if ($token !== '********') {
-            $this->saveSetting('ddns_cf_token', trim((string) $token));
+        // 每家服务商的凭据都单独保存，切换服务商不会丢失另一家的配置
+        $credentials = is_array($ddns['credentials'] ?? null) ? $ddns['credentials'] : [];
+        foreach (DnsProviderRegistry::classes() as $id => $class) {
+            if (!is_array($credentials[$id] ?? null)) {
+                continue;
+            }
+            foreach ($class::fields() as $field) {
+                $key = DnsProviderRegistry::settingKey($id, $field['key']);
+                $value = $credentials[$id][$field['key']] ?? null;
+                if ($field['type'] === 'switch') {
+                    $this->saveSetting($key, !empty($value) ? '1' : '0');
+                } elseif ($field['type'] === 'secret') {
+                    $value = trim((string) $value);
+                    if ($value !== '********') {
+                        $this->saveSetting($key, $value === '' ? '' : $this->encryptValue($value));
+                    }
+                } else {
+                    $this->saveSetting($key, trim((string) $value));
+                }
+            }
         }
-
-        $this->saveSetting('ddns_cf_proxied', !empty($cloudflare['proxied']) ? '1' : '0');
     }
 
     private function saveRotationSettings($rotation)

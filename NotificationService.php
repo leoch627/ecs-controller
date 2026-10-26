@@ -225,6 +225,27 @@ class NotificationService
         return $this->dispatchNotifications($title, '公网 IP 已成功更换，DDNS 解析已同步更新。', $details, 'success', $textMsg, $accountLabel);
     }
 
+    public function notifyDnsCleanup($label, $ip, $reasonText, $success, $resultText)
+    {
+        $title = $success ? '失效实例的解析已清理' : '解析清理失败';
+        $details = [
+            ['label' => '实例', 'value' => $label ?: '-'],
+            ['label' => '公网 IP', 'value' => $ip, 'highlight' => true],
+            ['label' => '触发原因', 'value' => $reasonText],
+            ['label' => '处理结果', 'value' => $resultText],
+            ['label' => '处理时间', 'value' => date('Y-m-d H:i:s')]
+        ];
+
+        $textMsg = "【ECS 服务器管家】{$title}\n" .
+            "实例: " . ($label ?: '-') . "\n" .
+            "公网 IP: {$ip}\n" .
+            "触发原因: {$reasonText}\n" .
+            "处理结果: {$resultText}\n" .
+            "处理时间: " . date('Y-m-d H:i:s');
+
+        return $this->dispatchNotifications($title, $resultText, $details, $success ? 'success' : 'warning', $textMsg, $label);
+    }
+
     public function notifyRotationSwitch($fromLabel, $toLabel, $entryDomain, $reason = '')
     {
         $title = '账号池已自动切换';

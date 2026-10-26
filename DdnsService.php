@@ -1,25 +1,72 @@
 <?php
 
+require_once __DIR__ . '/dns/DnsProviderRegistry.php';
+
+/**
+ * 域名解析服务。具体服务商见 dns/ 目录，这里只放与服务商无关的逻辑：
+ * 1. 自动解析 (DDNS)：按"账号备注[-实例].根域名"维护 A 记录。
+ * 2. 失效清理：实例过期、被释放或回收后，把指向该 IP 的 A 记录删掉（多值记录只移除这个 IP）。
+ */
 class DdnsService
 {
     private $config;
+    private $provider;
 
-    public function __construct(array $config)
+    /**
+     * @param array $config 全部设置（密钥已解密）
+     * @param DnsProvider|null $provider 测试时可直接注入
+     */
+    public function __construct(array $config, DnsProvider $provider = null)
     {
         $this->config = $config;
+        $this->provider = $provider ?: DnsProviderRegistry::create($config['ddns_provider'] ?? 'cloudflare', $config);
     }
 
+    public function getProvider()
+    {
+        return $this->provider::id();
+    }
+
+    public function getProviderLabel()
+    {
+        return $this->provider::label();
+    }
+
+    public function hasCredentials()
+    {
+        return $this->provider->isConfigured();
+    }
+
+    /**
+     * 自动解析是否可用：开关已开、服务商凭据和根域名齐全。
+     */
     public function isEnabled()
     {
         return ($this->config['ddns_enabled'] ?? '0') === '1'
-            && ($this->config['ddns_provider'] ?? 'cloudflare') === 'cloudflare'
-            && !empty($this->config['ddns_cf_token'])
-            && !empty($this->config['ddns_domain']);
+            && $this->hasCredentials()
+            && $this->domain() !== '';
+    }
+
+    /**
+     * 失效清理是否可用。未填根域名时扫描服务商账号下的全部域名。
+     */
+    public function isCleanupEnabled()
+    {
+        return ($this->config['dns_cleanup_enabled'] ?? '0') === '1' && $this->hasCredentials();
+    }
+
+    public function describeCleanupScope()
+    {
+        if ($this->provider->configuredZone()) {
+            return '指定 Zone 下的全部 A 记录';
+        }
+        $domain = $this->domain();
+        return $domain !== '' ? "{$domain} 下的全部 A 记录" : $this->getProviderLabel() . ' 账号下全部域名的 A 记录';
     }
 
     public function buildRecordName(array $account, $sameGroupInstanceCount = 1)
     {
-        $domain = $this->normalizeDomain($this->config['ddns_domain'] ?? '');
+        $domain = $this->domain();
         if ($domain === '') {
             throw new Exception('请先填写 DDNS 根域名');
         }
@@ -54,44 +101,27 @@ class DdnsService
             return ['success' => true, 'skipped' => true, 'message' => 'DDNS 未启用'];
         }
 
-        $recordName = strtolower(trim((string) $recordName));
+        $recordName = DnsProvider::normalizeName($recordName);
         $ip = trim((string) $ip);
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
             return ['success' => false, 'message' => '公网 IP 为空或不是公网 IPv4'];
         }
 
-        $existing = $this->findRecord($recordName);
-        $payload = [
-            'type' => 'A',
-            'name' => $recordName,
-            'content' => $ip,
-            'ttl' => 1,
-            'proxied' => ($this->config['ddns_cf_proxied'] ?? '0') === '1',
-            'comment' => 'Managed by CDT Monitor'
-        ];
-
-        if ($existing) {
-            // 同 IP 且代理模式未变则跳过，避免每次巡检都无意义地调用 Cloudflare API
-            $sameIp = (($existing['content'] ?? '') === $ip);
-            $sameProxied = (($existing['proxied'] ?? false) === $payload['proxied']);
-            if ($sameIp && $sameProxied) {
+        $zone = $this->zoneFor($recordName);
+        $records = $this->provider->listARecords($zone, $recordName);
+        foreach ($records as $record) {
+            if ($this->provider->recordMatches($record, $ip)) {
                 return ['success' => true, 'skipped' => true, 'record' => $recordName, 'ip' => $ip, 'action' => 'unchanged'];
             }
-            $response = $this->request('PUT', '/dns_records/' . $existing['id'], $payload);
-        } else {
-            $response = $this->request('POST', '/dns_records', $payload);
         }
 
-        if (empty($response['success'])) {
-            return ['success' => false, 'message' => $this->formatErrors($response)];
+        if (!empty($records)) {
+            $this->provider->updateARecord($zone, $records[0], [$ip]);
+            return ['success' => true, 'record' => $recordName, 'ip' => $ip, 'action' => 'updated'];
         }
 
-        return [
-            'success' => true,
-            'record' => $recordName,
-            'ip' => $ip,
-            'action' => $existing ? 'updated' : 'created'
-        ];
+        $this->provider->createARecord($zone, $recordName, $ip);
+        return ['success' => true, 'record' => $recordName, 'ip' => $ip, 'action' => 'created'];
     }
 
     public function deleteARecord($recordName)
@@ -100,129 +130,145 @@ class DdnsService
             return ['success' => true, 'skipped' => true, 'message' => 'DDNS 未启用'];
         }
 
-        $recordName = strtolower(trim((string) $recordName));
+        $recordName = DnsProvider::normalizeName($recordName);
         if ($recordName === '') {
             return ['success' => false, 'message' => 'DDNS 记录名为空'];
         }
 
-        $existing = $this->findRecord($recordName);
-        if (!$existing) {
+        $zone = $this->zoneFor($recordName);
+        $records = $this->provider->listARecords($zone, $recordName);
+        if (empty($records)) {
             return ['success' => true, 'skipped' => true, 'record' => $recordName, 'message' => '记录不存在'];
         }
+        foreach ($records as $record) {
+            $this->provider->deleteARecord($zone, $record);
+        }
+        return ['success' => true, 'record' => $recordName, 'action' => 'deleted'];
+    }
 
-        $response = $this->request('DELETE', '/dns_records/' . $existing['id']);
-        if (empty($response['success'])) {
-            return ['success' => false, 'message' => $this->formatErrors($response)];
+    /**
+     * 从解析中移除某个 IP：只含该 IP 的记录直接删除，多值记录只去掉这个 IP。
+     * 返回 ['success' => bool, 'changes' => [['record' => name, 'action' => deleted|updated]], 'message' => ...]
+     */
+    public function removeIpFromRecords($ip)
+    {
+        $ip = trim((string) $ip);
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return ['success' => false, 'changes' => [], 'message' => 'IP 地址无效'];
+        }
+        if (!$this->hasCredentials()) {
+            return ['success' => false, 'changes' => [], 'message' => '域名解析服务商凭据未配置'];
+        }
+
+        $changes = [];
+        foreach ($this->scopeZones() as $zone) {
+            foreach ($this->provider->listARecords($zone, null, $ip) as $record) {
+                $remaining = array_values(array_filter($record['values'], function ($value) use ($ip) {
+                    return $value !== $ip;
+                }));
+                if (empty($remaining)) {
+                    $this->provider->deleteARecord($zone, $record);
+                    $changes[] = ['record' => $record['name'], 'action' => 'deleted'];
+                } else {
+                    $this->provider->updateARecord($zone, $record, $remaining);
+                    $changes[] = ['record' => $record['name'], 'action' => 'updated', 'remaining' => count($remaining)];
+                }
+            }
         }
 
         return [
             'success' => true,
-            'record' => $recordName,
-            'action' => 'deleted'
+            'changes' => $changes,
+            'message' => empty($changes) ? '解析中没有指向该 IP 的 A 记录' : $this->summarizeChanges($changes)
         ];
     }
 
-    private function findRecord($recordName)
+    /**
+     * 用当前（未保存的）配置测试服务商连通性，返回可读的检测结果。
+     */
+    public function testConnection()
     {
-        $response = $this->request('GET', '/dns_records?type=A&name=' . rawurlencode($recordName));
-        if (empty($response['success'])) {
-            throw new Exception('Cloudflare 查询记录失败: ' . $this->formatErrors($response));
+        $label = $this->getProviderLabel();
+        if (!$this->hasCredentials()) {
+            throw new Exception("请先填写 {$label} 的凭据");
         }
 
-        $records = $response['result'] ?? [];
-        return $records[0] ?? null;
+        $zones = $this->scopeZones();
+        if ($this->provider->configuredZone() || $this->domain() !== '') {
+            $zone = $zones[0];
+            $count = count($this->provider->listARecords($zone));
+            $name = $zone['name'] ?: $zone['id'];
+            return [
+                'success' => true,
+                'message' => "{$label} 鉴权通过，已找到域名 {$name}，当前有 {$count} 条 A 记录。",
+                'zones' => [$name]
+            ];
+        }
+
+        $names = array_map(function ($zone) {
+            return $zone['name'];
+        }, $zones);
+        return [
+            'success' => true,
+            'message' => "{$label} 鉴权通过，账号下共有 " . count($zones) . ' 个域名' . (empty($names) ? '' : '：' . implode('、', array_slice($names, 0, 5)) . (count($names) > 5 ? ' 等' : '')) . '。未填写根域名时，失效清理会处理全部域名。',
+            'zones' => $names
+        ];
     }
 
-    private function request($method, $path, array $payload = null)
+    private function domain()
     {
-        $zoneId = $this->resolveZoneId();
-        $token = trim((string) ($this->config['ddns_cf_token'] ?? ''));
-        $url = 'https://api.cloudflare.com/client/v4/zones/' . rawurlencode($zoneId) . $path;
-
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Authorization: Bearer ' . $token,
-            'Content-Type: application/json'
-        ]);
-
-        if ($payload !== null) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-        }
-
-        $body = curl_exec($ch);
-        $error = curl_error($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($error) {
-            throw new Exception('Cloudflare 网络请求失败: ' . $error);
-        }
-
-        $decoded = json_decode((string) $body, true);
-        if (!is_array($decoded)) {
-            throw new Exception("Cloudflare 响应解析失败，状态码 {$httpCode}");
-        }
-
-        return $decoded;
+        $domain = strtolower(trim((string) ($this->config['ddns_domain'] ?? '')));
+        $domain = preg_replace('#^https?://#', '', $domain);
+        return trim(explode('/', $domain)[0] ?? '', '.');
     }
 
-    private function resolveZoneId()
+    private function configuredZone()
     {
-        $zoneId = trim((string) ($this->config['ddns_cf_zone_id'] ?? ''));
-        if ($zoneId !== '') {
-            return $zoneId;
+        $zone = $this->provider->configuredZone();
+        if ($zone && $zone['name'] === '') {
+            $zone['name'] = $this->domain();
         }
-
-        $domain = $this->normalizeDomain($this->config['ddns_domain'] ?? '');
-        if ($domain === '') {
-            throw new Exception('请先填写 DDNS 根域名');
-        }
-
-        $token = trim((string) ($this->config['ddns_cf_token'] ?? ''));
-        $url = 'https://api.cloudflare.com/client/v4/zones?name=' . rawurlencode($domain) . '&status=active';
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Authorization: Bearer ' . $token,
-            'Content-Type: application/json'
-        ]);
-        $body = curl_exec($ch);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($error) {
-            throw new Exception('Cloudflare Zone 查询失败: ' . $error);
-        }
-
-        $decoded = json_decode((string) $body, true);
-        if (empty($decoded['success'])) {
-            throw new Exception('Cloudflare Zone 查询失败: ' . $this->formatErrors(is_array($decoded) ? $decoded : []));
-        }
-
-        $zone = $decoded['result'][0] ?? null;
-        if (empty($zone['id'])) {
-            throw new Exception("Cloudflare 未找到域名 {$domain}，请确认 Token 有该域名的 DNS 编辑权限，或手动填写 Zone ID");
-        }
-
-        return $zone['id'];
+        return $zone;
     }
 
-    private function formatErrors(array $response)
+    /** 自动解析的记录所在 Zone：优先用配置的 Zone ID，否则按根域名查找 */
+    private function zoneFor($recordName)
     {
-        $errors = $response['errors'] ?? [];
-        if (empty($errors)) {
-            return '未知错误';
+        $configured = $this->configuredZone();
+        if ($configured) {
+            return $configured;
         }
 
-        $messages = [];
-        foreach ($errors as $error) {
-            $messages[] = $error['message'] ?? json_encode($error, JSON_UNESCAPED_UNICODE);
+        $lookup = $this->domain() !== '' ? $this->domain() : $recordName;
+        $zone = $this->provider->findZone($lookup);
+        if (!$zone) {
+            throw new Exception($this->getProviderLabel() . " 账号下没有找到域名 {$lookup}，请确认域名托管在这家服务商，且凭据有解析权限");
         }
-        return implode('；', $messages);
+        return $zone;
+    }
+
+    /** 失效清理 / 测试的范围：指定 Zone、根域名所在 Zone，或账号下全部域名 */
+    private function scopeZones()
+    {
+        $configured = $this->configuredZone();
+        if ($configured) {
+            return [$configured];
+        }
+        if ($this->domain() !== '') {
+            return [$this->zoneFor($this->domain())];
+        }
+        return $this->provider->listZones();
+    }
+
+    private function summarizeChanges(array $changes)
+    {
+        $parts = [];
+        foreach ($changes as $change) {
+            $parts[] = $change['action'] === 'deleted'
+                ? "已删除 {$change['record']}"
+                : "已从 {$change['record']} 移除（剩余 {$change['remaining']} 个 IP）";
+        }
+        return implode('；', $parts);
     }
 
     private function slug($value)
@@ -246,13 +292,5 @@ class DdnsService
             $value = substr(sha1($original), 0, 8);
         }
         return substr($value, 0, 48);
-    }
-
-    private function normalizeDomain($domain)
-    {
-        $domain = strtolower(trim((string) $domain));
-        $domain = preg_replace('#^https?://#', '', $domain);
-        $domain = trim(explode('/', $domain)[0] ?? '', '.');
-        return $domain;
     }
 }

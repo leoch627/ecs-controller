@@ -399,6 +399,45 @@ class AliyunService
     }
 
     /**
+     * 按实例 ID 精确确认实例是否还在云端。列表同步发现实例"消失"后用它复核，避免接口抖动误删本地记录和解析。
+     * @return bool
+     * @throws \Exception 网络或鉴权异常时抛出，调用方应视为"无法确认"
+     */
+    public function instanceExists($key, $secret, $regionId, $instanceId)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $instanceId) {
+            AlibabaCloud::accessKeyClient($key, $secret)
+                ->regionId($regionId)
+                ->asDefaultClient();
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeInstances')
+                ->method('POST')
+                ->host("ecs.{$regionId}.aliyuncs.com")
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'InstanceIds' => json_encode([$instanceId])
+                    ],
+                    'connect_timeout' => 10.0,
+                    'timeout' => 20.0
+                ])
+                ->request();
+        }, 'instanceExists');
+
+        foreach (($result['Instances']['Instance'] ?? []) as $instance) {
+            if (($instance['InstanceId'] ?? '') === $instanceId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * 获取实例详细健康状态 (用于识别操作系统启动中等状态)
      */
     public function getInstanceFullStatus($account)
@@ -649,7 +688,8 @@ class AliyunService
                             'eipAddress' => $instance['EipAddress']['IpAddress'] ?? '',
                             'privateIp' => $instance['VpcAttributes']['PrivateIpAddress']['IpAddress'][0] ?? '',
                             'stoppedMode' => $instance['StoppedMode'] ?? '',
-                            'chargeType' => $instance['InstanceChargeType'] ?? ''
+                            'chargeType' => $instance['InstanceChargeType'] ?? '',
+                            'expiredTime' => $instance['ExpiredTime'] ?? ''
                         ];
                     }
 

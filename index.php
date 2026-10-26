@@ -6,6 +6,12 @@ ini_set('session.use_strict_mode', 1);
 ini_set('session.use_only_cookies', 1);
 session_start();
 
+// 只有这几个动作会写 session；其他请求读完登录状态就释放 session 锁，
+// 否则一个慢请求（例如调用阿里云）会让同一浏览器的其他请求全部排队。
+if (!in_array($_GET['action'] ?? 'view', ['setup', 'login', 'logout', 'preview_ecs_create', 'create_ecs'], true)) {
+    session_write_close();
+}
+
 error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING & ~E_DEPRECATED);
 ini_set('display_errors', 0);
 
@@ -135,6 +141,34 @@ if ($action === 'save_config') {
         echo json_encode(['success' => true]);
     } else {
         echo json_encode(['success' => false, 'message' => '保存失败']);
+    }
+    exit;
+}
+
+if ($action === 'test_dns') {
+    header('Content-Type: application/json; charset=utf-8');
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    try {
+        echo json_encode($app->testDnsSettings($data['Ddns'] ?? []));
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => strip_tags($e->getMessage())]);
+    }
+    exit;
+}
+
+if ($action === 'get_dns_cleanup_tasks') {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['data' => $app->getDnsCleanupTasks()]);
+    exit;
+}
+
+if ($action === 'retry_dns_cleanup') {
+    header('Content-Type: application/json; charset=utf-8');
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    try {
+        echo json_encode($app->retryDnsCleanupTask((int) ($data['id'] ?? 0)));
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => strip_tags($e->getMessage())]);
     }
     exit;
 }
