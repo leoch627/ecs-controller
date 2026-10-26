@@ -20,21 +20,18 @@ jobs:
       - name: Generate next version tag
         id: generate_tag
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # Use the highest version tag in the repo, not `git describe` (the nearest one):
+          # several tags can sit on one commit, and describe may pick an older one,
+          # which makes the next tag collide with an existing release.
+          # The optional "v" prefix is stripped before sorting so v1.6.3 never outranks 1.7.0.
+          LATEST_TAG=$(git tag --list | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n 1)
           if [ -z "$LATEST_TAG" ]; then
             NEXT_TAG="v1.6.0"
           else
-            # Extract major.minor.patch
-            if [[ "$LATEST_TAG" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              MAJOR="${BASH_REMATCH[1]}"
-              MINOR="${BASH_REMATCH[2]}"
-              PATCH="${BASH_REMATCH[3]}"
-              NEXT_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
-            else
-              # Fallback if the previous tag format isn't standard
-              NEXT_TAG="v1.6.0"
-            fi
+            IFS=. read -r MAJOR MINOR PATCH <<< "$LATEST_TAG"
+            NEXT_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
           fi
+          echo "Latest tag: ${LATEST_TAG:-none}, next tag: $NEXT_TAG"
           echo "tag=$NEXT_TAG" >> $GITHUB_OUTPUT
 
       - name: Create or Update Release
