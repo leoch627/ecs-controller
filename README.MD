@@ -1,296 +1,187 @@
-# ecs-controller 🌩️
+# ECS 控制台
 
-<p align="center">
-  <img src="./icon.png" width="120" height="120" alt="ecs-controller Logo">
-</p>
+一个阿里云 ECS 管理面板，可以查看实例状态和流量，并按设置在流量达到阈值时自动关机。
 
-> **阿里云 CDT 流量监控与自动化管理终极解决方案**
-> 
-> 专为 **MJJ** 大佬设计。旨在最大化榨干阿里云 CDT 200GB 免费流量，集成流量实时监控、自动熔断保护、抢占式实例保活、**实例规格与价格透明展示**于一体。
+> 阿里云流量数据可能存在延迟，自动关机不能保证绝对不会产生额外费用。请保留余量，并关注面板中的异常提示。
 
-## ⚠️ 免责声明
+## 主要功能
 
-1. **配置参考**：本项目提供的默认一键创建配置仅供参考，请在下单前务必核对阿里云最新的 API 返回价格。
-2. **代码修改**：代码完全开源，您可以根据个人需求自行修改逻辑或 UI。
-3. **AI 开发声明**：本项目由 **AI (Antigravity)** 深度参与开发。作者已尽最大努力确保核心功能（如流量熔断、自动释放）的逻辑正确性。
-4. **Bug 修复**：由于云平台 API 变动或环境差异，如遇见 Bug 建议先行尝试自行修复，或提交 **Issue / PR**，由于精力有限，作者不保证实时维护。
-5. **风险自担**：因使用本脚本、或是阿里云 API 异常导致的相关资源损失或超支费用，作者概不负责。
+- 查看实例状态、规格、公网 IP 和流量。
+- 同时查看每台实例的流量（CMS）和账号流量（CDT），支持流量超限告警或自动关机。
+- 创建、启动、停止和释放 ECS，以及更换由面板创建并管理的弹性公网 IP（EIP）。
+- 定时开关机、停机保活和每月自动开机。
+- Telegram、邮件、接口回调（Webhook）通知和每日流量摘要，支持 Telegram 远程控制。
+- 自动将公网 IP 同步到 Cloudflare 域名（DDNS）。
+- 查看余额和消费账单，支持 Passkey 登录、自定义名称和 Logo。
+- 加密数据备份与恢复；恢复前请阅读[当前限制](#备份与恢复)。
 
----
+## 部署
 
-## 🆕 最近更新
+准备一台 Linux 服务器，安装并启动 **Docker（含 Docker Compose）**，同时安装 **Git 和 curl**。当前用户需要有运行 Docker 的权限。
 
-- **实例失效自动删除解析**：实例到期、被释放、被抢占回收或在控制台删除后，自动把指向它公网 IP 的 A 记录删掉（多 IP 记录只移除这一个）。失败自动重试，处理结果在「域名解析」页可查。
-- **支持 9 家 DNS 服务商**：阿里云、腾讯云 DNSPod、华为云、Cloudflare、AWS Route 53、NameSilo、Porkbun、GoDaddy、DigitalOcean，自动解析和失效清理都可用。
-- **页面秒开**：后台巡检正常时，打开页面只读本地数据，不再现场调用阿里云；各页面数据在后台自动刷新。
-- **界面重新设计**：实例状态和实例管理合并为一个「实例」页，开关机、换 IP、释放都在同一行完成；包年包月到期、流量超线直接标在实例上；设置分页签并带保存提示；适配手机。
-- 新增页面 Logo 自定义，支持本地上传或填写图片地址。
-- 优化一键创建 ECS：支持公网 IP 类型、硬盘类型、系统盘大小校验与更换公网 IP。
-- 优化释放中实例展示、前后端状态联动和移动端浮窗/表单体验。
+### 1. 安装服务
 
----
+在服务器上执行：
 
-## 🚀 快速部署
-
-### 方式一：Docker Compose (推荐)
-这是最省心的部署方案，内置了自动化的定时任务巡检，无需额外配置 Crontab。
-
-1. **新建配置文件** `docker-compose.yml`：
-```yaml
-services:
-  ecs-controller:
-    image: kori1c/ecs-controller:latest
-    container_name: ecs-controller
-    restart: always
-    ports:
-      - "43210:80"
-    volumes:
-      - ./data:/var/www/html/data
-    environment:
-      - TZ=Asia/Shanghai
-```
-
-2. **启动服务**：
 ```bash
-docker-compose up -d
-```
-访问 `http://localhost:43210` 即可开始使用。
-
----
-
-## 🔑 获取阿里云密钥
-
-为了让系统能够正常获取流量数据并管理实例，您需要准备具有相关权限的阿里云 AccessKey：
-
-1. **登录阿里云控制台**，前往 [RAM 访问控制 - 用户](https://ram.console.aliyun.com/users)。
-2. **创建用户**：点击“创建用户”，勾选“OpenAPI 调用访问”。
-3. **获取密钥**：保存好生成的 `AccessKey ID` 和 `AccessKey Secret`。
-4. **添加权限**：建议创建自定义 RAM 权限策略，按需授予最小权限。
-
-### 核心功能最低权限
-
-如果只使用实例同步、流量监控、自动停机、手动开关机和释放实例，至少需要：
-
-```text
-cms:DescribeMetricList
-ecs:DescribeInstances
-ecs:DescribeInstanceStatus
-ecs:StartInstance
-ecs:StopInstance
-ecs:DeleteInstance
-cdt:ListCdtInternetTraffic
+curl -fsSL https://raw.githubusercontent.com/Kori1c/ecs-controller/main/install.sh \
+  | env ECS_COOKIE_SECURE=0 bash
 ```
 
-其中 `cms:DescribeMetricList` 用于获取 ECS 公网出口流量，缺少后会导致流量统计不可用或自动停机不准确。
+安装脚本默认将项目放到 `~/ecs-controller`，下载现成镜像并启动服务，不会在服务器上编译。
 
-### 全功能推荐权限
+### 2. 开启 IP 访问
 
-如果需要使用本项目的全部功能，包括一键创建 ECS、自动创建网络与安全组、EIP 申请/绑定/释放、更换公网 IP、消费情况查询，建议使用以下自定义策略：
+服务默认只允许服务器本机访问。在安装目录的 [docker-compose.yml](./docker-compose.yml) 中，将端口映射 `"127.0.0.1:43211:8080"` 改为 `"43211:8080"`，其他内容保持不变，然后在服务器上执行：
 
-```json
-{
-  "Version": "1",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ecs:DescribeRegions",
-        "ecs:DescribeZones",
-        "ecs:DescribeInstances",
-        "ecs:DescribeInstanceStatus",
-        "ecs:DescribeInstancesFullStatus",
-        "ecs:DescribeInstanceTypes",
-        "ecs:DescribeImages",
-        "ecs:DescribeAvailableResource",
-        "ecs:DescribeSecurityGroups",
-        "ecs:StartInstance",
-        "ecs:StopInstance",
-        "ecs:DeleteInstance",
-        "ecs:RunInstances",
-        "ecs:CreateSecurityGroup",
-        "ecs:AuthorizeSecurityGroup"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "vpc:DescribeVpcs",
-        "vpc:DescribeVSwitches",
-        "vpc:CreateVpc",
-        "vpc:CreateVSwitch",
-        "vpc:DescribeEipAddresses",
-        "vpc:AllocateEipAddress",
-        "vpc:AssociateEipAddress",
-        "vpc:UnassociateEipAddress",
-        "vpc:ReleaseEipAddress"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cms:DescribeMetricList"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cdt:ListCdtInternetTraffic"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "bssapi:QueryAccountBalance",
-        "bssapi:DescribeInstanceBill",
-        "bssapi:QueryBillOverview"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
+```bash
+cd ~/ecs-controller
+ECS_COOKIE_SECURE=0 ./deploy.sh
 ```
 
-如果不需要消费情况展示，可以去掉 `bssapi:*` 相关权限。
+在服务器的云安全组中放行 TCP `43211`，建议只允许自己的 IP 访问。初始化时以这次启动显示的 `Setup token` 为准。
 
-### DNS 服务商凭据（可选）
+### 3. 打开面板
 
-使用自动解析或失效清理时，在「域名解析」页选择域名所在的服务商并填写凭据，点「测试连接」即可验证。各家需要的权限：
+在浏览器访问 **`http://服务器IP:43211`**，将“服务器IP”替换为实际地址。
 
-| 服务商 | 凭据 | 需要的权限 |
-|---|---|---|
-| 阿里云 | AccessKey ID / Secret | RAM 授予 `AliyunDNSFullAccess` |
-| 腾讯云 DNSPod | SecretId / SecretKey（访问管理 → API 密钥，不是旧版 DNSPod Token） | CAM 授予 `QcloudDNSPodFullAccess` |
-| 华为云 | AK / SK | IAM 授予 `DNS FullAccess`，或 `dns:zone:list`、`dns:recordset:list/create/update/delete` |
-| Cloudflare | API Token | Zone · DNS · Edit 和 Zone · Zone · Read |
-| AWS Route 53 | Access Key ID / Secret | `route53:ListHostedZones`、`route53:ListResourceRecordSets`、`route53:ChangeResourceRecordSets` |
-| NameSilo | API Key | 非只读 Key；设置了 IP 白名单要加入服务器 IP。TTL 最低 3600 秒 |
-| Porkbun | API Key / Secret API Key | 在域名设置里打开「API Access」 |
-| GoDaddy | API Key / Secret | Production Key；GoDaddy 只对 10 个以上域名或订阅 Discount Domain Club 的账号开放 API |
-| DigitalOcean | Personal Access Token | domain 的 read / create / update / delete |
+**建议正式使用时配置 HTTPS 域名访问，避免密码和账号信息以明文传输。**使用 HTTPS 时应启用 `ECS_COOKIE_SECURE=1`；Passkey 登录需要证书有效的 HTTPS 域名。
 
-填写根域名后只处理该域名下的记录；留空则处理该服务商账号下的全部域名。Route 53 中带路由策略或别名的记录不会被修改。
+修改端口映射会产生本地部署配置改动，当前在线更新会拒绝覆盖这类改动，详见[在线更新](#在线更新)。
 
----
+## 第一次使用
 
-## ✨ 核心功能
+1. 保存安装脚本最后显示的 `Setup token`（初始化 token）。
+2. 在浏览器打开面板，输入 token 并设置管理员密码。系统最低要求 6 位，建议使用较长、独立的密码。
+3. 按下面的[权限说明](#阿里云权限)准备阿里云子账号，再进入“账号管理”添加账号、区域和可用流量。
+4. 点击“测试账号”，按各项结果补充权限，再保存账号。系统会同步所选区域下的实例。
+5. 进入“系统设置 → 流量保护”设置阈值和动作，在“通知中心”配置通知并发送测试消息。
 
+### 初始化 token 忘记了怎么办
 
-### 🛡️ 流量盾牌 (CDT 监控)
-- **多账户聚合**：支持同时管理多个阿里云 AK/SK，多区域实例一屏尽览。
-- **自然月流量重置**：自动适配阿里云 CDT 计费周期，每月 1 号零点自动重置已用流量统计。
-- **熔断机制**：支持设定 **告警阈值 (如 95%)**，触发时自动执行关机动作。
-- **灵活关机模式**：可选 **普通停机 (KeepCharging)** 或 **节省停机 (StopCharging/释放计算资源停止计费)**。
+通过上述安装脚本部署时，在服务器上执行：
 
-### ⚡ 自动化高阶管理
-- **异步安全释放**：彻底解决释放逻辑响应缓慢问题。点击后后台接管，自动执行“强制离线 -> 等待状态 -> 物理销毁”全流程，无需前台苦等。
-- **抢占式实例保活**：实时守护低成本 Spot 实例，检测到非预期停机时（如被回收）自动重试拉起。
-- **定时任务清单**：支持为指定实例设置每日定时开机、定时关机计划（自定义时间点）。
-- **ECS 快速创建**：支持从预设规格中一键拉起新实例（默认采用最低配置、最低价格方案），并自动配置安全组与防火墙规则。
-- **预检与成本预览**：创建前自动调用阿里云 API 进行库存预检与其费用估算，拒绝盲目下单。
-- **初次登录信息保护**：针对新建实例，系统仅在创建成功的瞬间展示初始密码，确保 AK/SK 与凭据安全。
-- **DDNS 联动**：支持阿里云、腾讯云 DNSPod、华为云、Cloudflare、AWS Route 53、NameSilo、Porkbun、GoDaddy、DigitalOcean，实例创建、启动、更换 IP 后自动同步 A 记录。
-- **失效实例解析清理**：实例到期 / 释放 / 被回收后自动删除指向其 IP 的解析；"实例消失"会按 ID 二次确认，IP 仍被其他在用实例使用时跳过。
+```bash
+docker exec ecs-controller printenv ECS_SETUP_TOKEN
+```
 
-### 📊 成本与审计
-- **费用中心**：实时拉取账号 **可用余额**，并预估当月实例已产生账单金额。
-- **实时日志审计**：详细记录系统心跳、API 调用状态、告警触发记录，支持分级清理，保证系统轻量运行。
-- **一键同步**：支持主动从阿里云云端同步最新机器规格、状态、公网 IP 等所有属性。
+如果没有输出，说明服务可能自行生成了 token，再查看日志，并使用最近一次启动时显示的 token：
 
-### 📢 预警系统
-- **多通路覆盖**：集成 **Telegram (纸飞机)**、**SMTP 邮件** 及 **通用 Webhook** 接口。
-- **状态变更通知**：实例关机、启动、释放成功、流量超标时均会发送详尽的富文本通知。
+```bash
+docker logs ecs-controller 2>&1 | grep '初始化 token'
+```
 
----
+token 只用于首次初始化，不是管理员登录密码，也不能用于重置已设置的管理员密码。不要公开 token 或包含 token 的日志。
 
-## 💡 省钱小秘籍 (Saving Tips)
+## 阿里云权限
 
-- **流量熔断**：系统默认检测到流量即将用尽时自动关机（建议配合“节省停机”模式），确保不产生额外扣费，真正做到“用完即止”。
-- **折扣充值**：本项目可搭配 [portal.acm.ee](https://portal.acm.ee/) 使用，享受阿里云七折充值优惠，叠加 CDT 200GB 免费流量，实现在线极致性价比。
+创建一个专门给本项目使用的 RAM 用户（阿里云子账号），不要使用主账号密钥，也不需要授予管理员权限。
 
----
+### 怎么添加权限
 
-## 📸 界面预览
+1. 在阿里云控制台搜索并进入“访问控制 RAM”。
+2. 创建用户，开启“OpenAPI 调用访问”，创建并保存 AccessKey ID 和 AccessKey Secret。
+3. 给这个用户“添加权限”，选择“系统策略”，按下面的完整名称搜索并添加。
+4. 将该用户的 AccessKey ID 和 AccessKey Secret 填入本面板的“账号管理”。
 
-> 以下截图来自测试环境，仅用于展示界面结构与核心流程。正式使用时请妥善保管 AK/SK、服务器密码、通知 Token 等敏感信息。
+### 管理已有实例和监控流量
 
-### 实例状态总览
+添加下面 3 项。名称可以直接复制搜索，点击名称可查看阿里云官方说明。
 
-卡片式展示所有已同步 ECS：运行状态、区域、实例编号、公网地址、出口流量、带宽峰值、阈值与最后同步时间一屏可见。
+| 权限名称 | 用途 |
+| --- | --- |
+| [AliyunECSFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunecsfullaccess) | 查看和管理 ECS，支持开关机、流量超限自动关机和定时开关机 |
+| [AliyunCloudMonitorReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuncloudmonitorreadonlyaccess) | 读取实例流量（CMS），以及 EIP 的地址和带宽 |
+| [AliyunCDTReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuncdtreadonlyaccess) | 读取账号流量（CDT） |
 
-![实例状态总览](./image/截屏2026-04-16%2012.15.51.png)
+注意：这是方便配置的方案，不是权限最少的方案。`AliyunECSFullAccess` 也允许创建和删除 ECS；只授予 ECS 只读权限则无法自动关机。
 
-### 实例管理
+### 按需添加的权限
 
-集中管理账号下的全部实例，支持手动同步、启动、停止、释放，以及查看实例规格、出口流量和公网带宽。
+| 想使用的功能 | 额外添加的权限 |
+| --- | --- |
+| 在面板中创建实例，并自动创建网络 | [AliyunVPCFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunvpcfullaccess) |
+| 创建实例时使用 EIP、更换 EIP，或释放实例时清理 EIP | [AliyunEIPFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuneipfullaccess) |
+| 查看余额和消费账单 | [AliyunBSSReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunbssreadonlyaccess) |
 
-![实例管理](./image/截屏2026-04-16%2012.15.56.png)
+不用对应功能时，可以不添加额外权限。**VPC 权限不包含 EIP 管理权限**，需要单独添加 EIP 权限。创建实例和 EIP 可能产生费用，请按需授权。
 
-### 账号管理
+### 怎么看账号测试结果
 
-账号以列表方式维护，支持备注名、区域、站点、账号可用流量、消费情况与同步状态展示；新增账号使用弹窗填写，避免页面过长。
+- **通过**：本次查询或安全预检通过，不代表所有实例和所有功能都已授权。
+- **缺少权限**：按该项显示的名称补充权限；已添加时，检查是否限制了区域或实例。
+- **未验证**：暂时无法安全确认，不等于没有权限，不要为了消除提示而授予管理员权限。
+- **检查失败**：可能是网络、服务未开通或账号信息问题，按提示处理后重试。
 
-![账号管理](./image/截屏2026-04-16%2012.16.05.png)
+测试不会实际开关机、创建或删除云资源。当前区域没有实例，或接口不支持安全预检时，部分操作权限会显示“未验证”。
 
-### 系统设置
+## 流量保护与自动化
 
-全局阈值、实例同步频率、停机方式、自动开机、抢占式保活、费用分析、DDNS 与通知配置统一收纳到系统设置中。
+“账号管理”里的**账号可用流量（GB）**是你为保护设置的额度，不是带宽，也不会自动购买流量包；请根据自己的阿里云套餐或预算填写。
 
-![系统设置](./image/截屏2026-04-16%2012.16.12.png)
+“系统设置 → 流量保护”里的**告警阈值（%）**决定何时触发动作。例如可用流量填 **190 GB**，阈值设为 **95%**，约在 **180.5 GB** 时触发。
 
-### 系统日志
+系统取可用的 CMS、CDT 流量中较大的值判断阈值，不把两者相加。选择“自动关机并告警”才会发起关机；选择“仅发送告警”不会关机。两种流量接口都不可用时，自动保护会暂停，请及时处理异常。
 
-区分动作日志与心跳日志，方便排查接口调用、实例状态变化、流量熔断、DDNS 同步和通知推送结果。
+定时开关机在账号编辑窗口中设置；停机保活、每月 1 号自动开机和费用查询在“系统设置 → 运行与费用”中设置。保活只尝试启动仍存在的实例，不会自动重建已经被回收或释放的实例。
 
-![系统日志](./image/截屏2026-04-16%2012.16.18.png)
+## 备份与恢复
 
-### 一键创建 ECS
+进入“系统设置 → 备份恢复”，输入至少 8 位的备份密码，再点击“下载备份”。备份密码不会保存在系统中，请将备份文件和密码分开妥善保管。
 
-创建前会生成配置清单：实例规格、系统镜像、系统盘、网络、安全组、公网带宽与费用提示都会在确认前展示，避免盲目下单。
+恢复时选择备份文件并输入同一个密码。**恢复会覆盖当前账号、设置和历史数据，并清除登录会话**，完成后需要使用备份中的管理员凭据重新登录。
 
-![一键创建 ECS 配置清单](./image/截屏2026-04-16%2011.24.03.png)
+> **当前已知限制：**从另一套安装恢复后，服务重启会导致恢复的账号密钥无法读取。问题修复前，暂不建议使用网页恢复进行跨机器迁移。下载加密备份不受此限制。
 
-### 新增账号弹窗
+更换域名时，原有 Passkey 不能直接沿用。迁移前应开启密码登录，并确认记得管理员密码。
 
-账号录入通过弹窗完成，填写备注名、AK、区域、站点和账号可用流量后即可保存并同步实例。
+## Passkey 登录
 
-![新增账号弹窗](./image/截屏2026-04-16%2012.16.27.png)
+进入“系统设置 → 登录安全”，点击“设置 Passkey”，以后可使用指纹、面容、系统 PIN 或安全密钥登录。
 
----
+注册和登录均使用证书有效的 HTTPS 域名，并始终使用注册时的域名。
 
+至少注册一个 Passkey 后才能关闭密码登录。关闭前请确认 Passkey 能正常登录，并保留管理员密码。
 
+## 在线更新
 
-## 🛠️ 技术架构
+进入“关于 → 版本中心”，先点击“检查更新”，确认可更新后再点击“立即更新”。版本发布不代表镜像已构建完成；显示镜像尚未就绪时，稍后重新检查即可。
 
-- **Backend**: 原生 PHP 8.1+，无框架依赖，追求极致性能。
-- **Database**: SQLite 3 (WAL 模式)，兼顾轻量与读写并发。
-- **Frontend**: Vue 3.x (SFC 理念) + 原生 Vanilla CSS。
-- **SDK**: Alibaba Cloud SDK for PHP (V1)。
+在线更新需要带更新服务的 Docker 部署，并且部署文件保持官方版本。更新会拉取现成镜像，不会在服务器上编译，也不会主动删除现有账号、配置和流量数据。建议更新前下载一次备份。
 
----
+按上述 IP 访问步骤修改端口映射后，部署目录存在本地改动，当前在线更新会拒绝执行。更新前请先备份并处理这些改动，避免端口配置被覆盖；不要强行覆盖自己的修改。
 
-## ☕ 赏杯咖啡 (Donation)
+如果旧版本没有在线更新功能，需要在保留自定义配置的前提下重新安装，保持安装目录不变。
 
-如果您觉得这个工具对您有帮助，阔佬随手赏杯咖啡：
+## 常见问题
 
-- **USDT-TRC20**: `TMBmXngHcKtNo9nLxTCJcGTfNutsbb9rp3`
-- **USDT-Polygon**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
-- **USDT-BSC**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
-- **USDT-ERC20**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
-- **USDT-ArbitrumOne**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
+| 问题 | 建议处理方式 |
+| --- | --- |
+| 安装提示缺少 Git、Docker 或 Compose | 先补齐依赖；确认 Docker 已运行，当前用户能执行 `docker info` |
+| IP 加端口打不开面板 | 检查服务是否运行、端口映射是否已调整，以及云安全组是否允许访问 TCP `43211` |
+| 镜像下载失败或提示 `manifest unknown` | 新版本镜像可能还在构建，稍后重试；下载超时则检查服务器访问 GitHub 和 Docker Hub 的网络 |
+| CMS 或 CDT 不可用 | 先用“测试账号”检查权限；“未验证”不是无权限，数据尚未更新时可稍后再试 |
+| 无法在线更新 | 确认使用带更新服务的 Docker 部署且没有本地文件修改；镜像未就绪时稍后重试 |
+| 提示部署目录存在未提交修改 | 端口映射等自定义配置也属于本地修改；先备份并处理改动，不要强行覆盖 |
 
----
+## 安全提醒
 
+- 不要公开 AccessKey、AccessKey Secret、初始化 token、备份密码或包含这些信息的日志。
+- 建议使用 HTTPS 访问面板；IP 直连时，云安全组尽量只允许可信 IP 访问。
+- 只授予需要的子账号权限，不要使用主账号密钥或管理员权限。
+- 不要执行 `docker compose down -v` 或随意删除数据卷，否则可能丢失账号、配置和历史数据。
 
+## 请喝咖啡
 
+如果这个工具对你有帮助，欢迎支持项目：
 
-## 📄 许可协议
+<img src="./static/donation-code.jpg" alt="项目赞赏码" width="240">
 
-本项目遵循 [MIT License](https://opensource.org/licenses/MIT) 开源协议。
+- USDT-TRC20：`TMBmXngHcKtNo9nLxTCJcGTfNutsbb9rp3`
+- USDT-Polygon / BSC / ERC20 / ArbitrumOne：`0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
 
----
-<p align="center">Made with ❤️ for Aliyun Users</p>
-<p align="center">Based on <a href="https://github.com/wang4386/CDT-Monitor">CDT-Monitor</a></p>
+## 相关链接
+
+- 项目地址：https://github.com/Kori1c/ecs-controller
+- 问题反馈：https://github.com/Kori1c/ecs-controller/issues
+- 许可证：[MIT](./LICENSE)
