@@ -17,6 +17,9 @@ services:
       ECS_COOKIE_SECURE: ${ECS_COOKIE_SECURE:-0}
       ECS_UPDATE_DIR: /var/lib/ecs-controller/update
       ECS_IMAGE_REPOSITORY: ${ECS_IMAGE_REPOSITORY:-docker.io/kori1c/ecs-controller}
+      # Forks set these (e.g. in .env) so update checks follow their own repository.
+      ECS_UPDATE_REPO: ${ECS_UPDATE_REPO:-Kori1c/ecs-controller}
+      ECS_UPDATE_BRANCH: ${ECS_UPDATE_BRANCH:-main}
     security_opt:
       - no-new-privileges:true
 
