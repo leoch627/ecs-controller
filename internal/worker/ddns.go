@@ -7,46 +7,72 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Kori1c/ecs-controller/internal/app"
-	"github.com/Kori1c/ecs-controller/internal/notify"
+	"github.com/Kori1c/ecs-controller/internal/dns"
+	"github.com/Kori1c/ecs-controller/internal/store"
 )
 
 var ddnsSlugPattern = regexp.MustCompile(`[^a-z0-9]+`)
 
+func (w *Worker) dnsSettings() dns.Settings {
+	return dns.LoadSettings(w.Store.GetSetting, w.Store.OpenSecret)
+}
+
+func (w *Worker) dnsService(settings dns.Settings) (*dns.Service, error) {
+	return dns.NewService(settings, w.DNSClient)
+}
+
 func (w *Worker) syncDDNSAccount(ctx context.Context, account app.Account) {
-	if !w.ddnsEnabled() || account.InstanceID == "" || account.CloudPresence == "missing" {
+	settings := w.dnsSettings()
+	if !settings.DDNSActive() || account.InstanceID == "" || account.CloudPresence == "missing" {
 		return
 	}
-	address := account.PublicIP
-	if account.PublicIPMode == "eip" && account.EIPAddress != "" {
-		address = account.EIPAddress
+	// An expired instance's IP is being removed from DNS; writing it back
+	// here would undo the cleanup.
+	if w.Store.InstanceExpiry(account.InstanceID).Expired(time.Now()) {
+		return
 	}
+	address := store.AccountPublicIP(account)
 	if address == "" {
+		return
+	}
+	service, err := w.dnsService(settings)
+	if err != nil {
+		w.Store.AddLog("warning", "DDNS 同步失败: "+err.Error())
 		return
 	}
 	accounts, _ := w.Store.LoadAccounts(false)
 	name := w.ddnsRecordName(account, accounts)
-	token, _ := w.Store.OpenSecret(w.Store.GetSetting("ddns_cf_token", ""))
-	err := notify.CloudflareUpdateRecord(ctx, token, w.Store.GetSetting("ddns_cf_zone_id", ""), w.Store.GetSetting("ddns_domain", ""), name, address, w.Store.GetSetting("ddns_cf_proxied", "0") == "1")
+	action, err := service.SyncA(ctx, name, address)
 	if err != nil {
-		w.Store.AddLog("warning", "Cloudflare DDNS 同步失败: "+err.Error())
+		w.Store.AddLog("warning", service.Label()+" DDNS 同步失败: "+err.Error())
 		return
 	}
-	w.Store.AddLog("info", fmt.Sprintf("DDNS 已同步 [%s] %s -> %s", accountLabel(account), name, address))
+	if action != "unchanged" {
+		w.Store.AddLog("info", fmt.Sprintf("DDNS 已同步 [%s] %s -> %s", accountLabel(account), name, address))
+	}
 }
 
 func (w *Worker) deleteDDNSAccount(ctx context.Context, account app.Account, before []app.Account) error {
-	if !w.ddnsEnabled() || account.InstanceID == "" {
+	settings := w.dnsSettings()
+	if !settings.DDNSActive() || account.InstanceID == "" {
 		return nil
 	}
-	name := w.ddnsRecordName(account, before)
-	token, _ := w.Store.OpenSecret(w.Store.GetSetting("ddns_cf_token", ""))
-	if err := notify.CloudflareDeleteRecord(ctx, token, w.Store.GetSetting("ddns_cf_zone_id", ""), w.Store.GetSetting("ddns_domain", ""), name); err != nil {
-		w.Store.AddLog("warning", "Cloudflare DDNS 清理失败: "+err.Error())
+	service, err := w.dnsService(settings)
+	if err != nil {
 		return err
 	}
-	w.Store.AddLog("info", "DDNS 已删除: "+name)
+	name := w.ddnsRecordName(account, before)
+	deleted, err := service.DeleteByName(ctx, name)
+	if err != nil {
+		w.Store.AddLog("warning", service.Label()+" DDNS 清理失败: "+err.Error())
+		return err
+	}
+	if deleted {
+		w.Store.AddLog("info", "DDNS 已删除: "+name)
+	}
 	return nil
 }
 
@@ -73,7 +99,7 @@ func (w *Worker) syncAllDDNS(ctx context.Context) {
 }
 
 func (w *Worker) ddnsEnabled() bool {
-	return w.Store.GetSetting("ddns_enabled", "0") == "1" && w.Store.GetSetting("ddns_provider", "cloudflare") == "cloudflare" && w.Store.GetSetting("ddns_domain", "") != ""
+	return w.dnsSettings().DDNSActive()
 }
 
 func (w *Worker) ddnsRecordName(account app.Account, accounts []app.Account) string {

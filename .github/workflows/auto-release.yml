@@ -20,7 +20,12 @@ jobs:
       - name: Generate next version tag
         id: generate_tag
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # Use the highest version tag, not `git describe` (the nearest one):
+          # several tags can sit on one commit and describe may pick an older
+          # one, which makes the next tag collide with an existing release.
+          # Sort on the bare version but keep the real tag name for the notes.
+          LATEST_TAG=$(git tag --list | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sed -E 's/^v?(.*)$/\1 &/' | sort -V -k1,1 | tail -n 1 | cut -d' ' -f2)
           if [ -z "$LATEST_TAG" ]; then
             NEXT_TAG="v1.17.1"
           else

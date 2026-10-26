@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ type Worker struct {
 	Cloud        cloud.Client
 	CloudFactory func(app.AccountGroup) cloud.Client
 	Log          *log.Logger
+	// DNSClient is the HTTP client for DNS provider APIs; nil uses a default.
+	DNSClient *http.Client
 }
 
 const cloudInventoryInterval = 10 * time.Minute
@@ -280,6 +283,9 @@ func (w *Worker) purgeMissingAccount(ctx context.Context, account app.Account) e
 	}
 	if err := w.Store.DeleteInstanceData(account.ID); err != nil {
 		return err
+	}
+	if _, err := w.Store.EnqueueAccountDNSCleanup(account, "vanished"); err != nil {
+		w.Store.AddLog("warning", "实例已消失，但解析清理任务入队失败: "+err.Error())
 	}
 	if w.ddnsEnabled() {
 		jobID := fmt.Sprintf("missing-ddns-%s-%d", account.InstanceID, time.Now().UnixNano())
@@ -613,6 +619,9 @@ func (w *Worker) Run(ctx context.Context) {
 			if job.Kind == "delete_instance" {
 				maxAttempts = 20
 			}
+			if job.Kind == store.DNSCleanupKind {
+				maxAttempts = 10
+			}
 			if job.Attempts < maxAttempts {
 				_ = w.Store.RetryJob(job.JobID, retryDelay(job.Attempts), err.Error())
 			} else {
@@ -622,6 +631,9 @@ func (w *Worker) Run(ctx context.Context) {
 					}
 				}
 				_ = w.Store.FailJob(job.JobID, err.Error())
+				if job.Kind == store.DNSCleanupKind {
+					w.notifyDNSCleanupFailed(ctx, job, err)
+				}
 			}
 			continue
 		}
@@ -637,6 +649,8 @@ func (w *Worker) execute(ctx context.Context, job *store.Job) error {
 		return w.deleteInstance(ctx, job)
 	case "delete_ddns":
 		return w.deleteDDNSJob(ctx, job)
+	case store.DNSCleanupKind:
+		return w.dnsCleanupJob(ctx, job)
 	default:
 		return fmt.Errorf("unknown job kind %q", job.Kind)
 	}
@@ -716,9 +730,14 @@ func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
 		}
 	}
 	// Keep the local row in Releasing until the external DNS record is also
-	// gone, so a transient Cloudflare failure remains retryable.
+	// gone, so a transient DNS provider failure remains retryable.
 	if err := w.deleteDDNSAccount(ctx, *account, beforeAccounts); err != nil {
 		return err
+	}
+	// The account row still holds the IP the instance had (including a managed
+	// EIP that was just released), so queue it before the row is removed.
+	if _, err := w.Store.EnqueueAccountDNSCleanup(*account, "released"); err != nil {
+		w.Store.AddLog("warning", "实例已释放，但解析清理任务入队失败: "+err.Error())
 	}
 	if err := w.Store.PhysicallyDelete(id); err != nil {
 		return err

@@ -23,6 +23,7 @@ import (
 
 	"github.com/Kori1c/ecs-controller/internal/app"
 	"github.com/Kori1c/ecs-controller/internal/cloud"
+	"github.com/Kori1c/ecs-controller/internal/dns"
 	"github.com/Kori1c/ecs-controller/internal/inventory"
 	"github.com/Kori1c/ecs-controller/internal/notify"
 	"github.com/Kori1c/ecs-controller/internal/store"
@@ -44,6 +45,8 @@ type Server struct {
 	previews      map[string]map[string]any
 	imageChecker  func(context.Context, string) (bool, string, error)
 	githubAPIBase string
+	// DNSClient is the HTTP client for DNS provider APIs; nil uses a default.
+	DNSClient *http.Client
 }
 
 func New(st *store.Store, dataDir, templatePath, setupToken string, client cloud.Client) *Server {
@@ -304,6 +307,12 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 		s.status(w)
 	case "get_config":
 		s.config(w)
+	case "test_dns":
+		s.testDNS(w, data)
+	case "get_dns_cleanup_tasks":
+		s.dnsCleanupTasks(w)
+	case "retry_dns_cleanup":
+		s.retryDNSCleanup(w, data)
 	case "create_backup":
 		s.createBackup(w, r, data)
 	case "passkey_register_start":
@@ -439,7 +448,7 @@ func (s *Server) config(w http.ResponseWriter) {
 			m.used = m.fallbackUsed
 		}
 	}
-	result := map[string]any{"admin_password": "********", "admin_password_set": s.Store.IsInitialized(), "password_login_enabled": settingBool(settings["password_login_enabled"], true), "passkey_count": s.Store.PasskeyCount(), "traffic_threshold": numberString(settings["traffic_threshold"], 95), "shutdown_mode": fallback(settings["shutdown_mode"], "KeepCharging"), "threshold_action": fallback(settings["threshold_action"], "stop_and_notify"), "keep_alive": settings["keep_alive"] == "1", "monthly_auto_start": settings["monthly_auto_start"] == "1", "api_interval": numberString(settings["api_interval"], 600), "enable_billing": settings["enable_billing"] == "1", "AppBrand": map[string]any{"name": fallback(settings["app_name"], "ECS 控制台"), "logo_url": settings["app_logo_url"]}, "Notification": notificationSettings(settings), "Ddns": map[string]any{"enabled": settings["ddns_enabled"] == "1", "provider": fallback(settings["ddns_provider"], "cloudflare"), "domain": settings["ddns_domain"], "cloudflare": map[string]any{"zone_id": settings["ddns_cf_zone_id"], "token": masked(settings["ddns_cf_token"]), "proxied": settings["ddns_cf_proxied"] == "1"}}, "Accounts": []any{}}
+	result := map[string]any{"admin_password": "********", "admin_password_set": s.Store.IsInitialized(), "password_login_enabled": settingBool(settings["password_login_enabled"], true), "passkey_count": s.Store.PasskeyCount(), "traffic_threshold": numberString(settings["traffic_threshold"], 95), "shutdown_mode": fallback(settings["shutdown_mode"], "KeepCharging"), "threshold_action": fallback(settings["threshold_action"], "stop_and_notify"), "keep_alive": settings["keep_alive"] == "1", "monthly_auto_start": settings["monthly_auto_start"] == "1", "api_interval": numberString(settings["api_interval"], 600), "enable_billing": settings["enable_billing"] == "1", "AppBrand": map[string]any{"name": fallback(settings["app_name"], "ECS 控制台"), "logo_url": settings["app_logo_url"]}, "Notification": notificationSettings(settings), "Ddns": s.dnsConfig(), "DnsProviders": dns.Providers(), "Accounts": []any{}}
 	items := result["Accounts"].([]any)
 	for _, g := range groups {
 		m := metrics[g.GroupKey]
@@ -744,6 +753,7 @@ func laterTimestamp(current, candidate string) string {
 
 func (s *Server) status(w http.ResponseWriter) {
 	accounts, _ := s.Store.LoadAccounts(false)
+	expiries := s.Store.ExpiryByInstance()
 	data := make([]map[string]any, 0)
 	for _, a := range accounts {
 		if a.InstanceID == "" {
@@ -757,7 +767,7 @@ func (s *Server) status(w http.ResponseWriter) {
 		if label == "" {
 			label = a.AccessKeyID
 		}
-		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95)), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "trafficScope": trafficScope(a.TrafficAPIStatus), "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing"})
+		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95)), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "trafficScope": trafficScope(a.TrafficAPIStatus), "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
 	}
 	s.json(w, 200, map[string]any{"data": data, "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
 }
@@ -815,15 +825,8 @@ func (s *Server) saveConfig(data map[string]any) error {
 		_ = s.Store.SetSetting("app_logo_url", stringValue(brand["logo_url"]))
 	}
 	if ddns, ok := data["Ddns"].(map[string]any); ok {
-		_ = s.Store.SetSetting("ddns_enabled", bool01(ddns["enabled"]))
-		_ = s.Store.SetSetting("ddns_provider", stringValue(ddns["provider"]))
-		_ = s.Store.SetSetting("ddns_domain", stringValue(ddns["domain"]))
-		if cf, ok := ddns["cloudflare"].(map[string]any); ok {
-			_ = s.Store.SetSetting("ddns_cf_zone_id", stringValue(cf["zone_id"]))
-			_ = s.Store.SetSetting("ddns_cf_proxied", bool01(cf["proxied"]))
-			if err := s.saveSecret("ddns_cf_token", stringValue(cf["token"])); err != nil {
-				return err
-			}
+		if err := s.saveDNSConfig(ddns); err != nil {
+			return err
 		}
 	}
 	if notify, ok := data["Notification"].(map[string]any); ok {
@@ -1407,6 +1410,11 @@ func (s *Server) replaceIP(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 500, "新 EIP 已绑定，但本地状态保存失败: "+err.Error())
 		return
 	}
+	// The old EIP went back to Alibaba Cloud's pool and may be handed to
+	// someone else, so take it out of DNS.
+	if _, err := s.Store.EnqueueDNSCleanup(oldIP, a.InstanceID, accountDisplay(*a), "ip_replaced"); err != nil {
+		s.Store.AddLog("warning", "旧 IP 解析清理任务入队失败: "+err.Error())
+	}
 	s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】公网 IP 已更换\n实例: %s\n旧 IP: %s\n新 IP: %s\n区域: %s", accountDisplay(*a), oldIP, ip, a.RegionID), Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
 	s.json(w, 200, map[string]any{"success": true, "message": "公网 IP 已更换", "data": map[string]any{"publicIp": ip, "publicIpMode": "eip", "eipAllocationId": alloc, "eipAddress": ip, "internetMaxBandwidthOut": a.InternetBandwidth}})
 }
@@ -1454,6 +1462,9 @@ func (s *Server) refreshAccount(w http.ResponseWriter, data map[string]any) {
 					s.Store.AddLog("warning", "云端实例已清理，但 DDNS 清理任务入队失败: "+enqueueErr.Error())
 				}
 				_ = s.Store.SetSetting("last_ddns_reconcile", "0")
+			}
+			if _, enqueueErr := s.Store.EnqueueAccountDNSCleanup(*a, "vanished"); enqueueErr != nil {
+				s.Store.AddLog("warning", "实例已消失，但解析清理任务入队失败: "+enqueueErr.Error())
 			}
 			s.Store.AddLog("info", "手动刷新确认云端实例不存在，已彻底清理本地记录")
 			s.error(w, 404, "云端实例不存在，已从面板移除")
@@ -1825,7 +1836,7 @@ func (s *Server) csrfOK(w http.ResponseWriter, r *http.Request) bool {
 }
 func (s *Server) mutating(a string) bool {
 	switch a {
-	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup":
+	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup", "test_dns", "retry_dns_cleanup":
 		return true
 	}
 	return false

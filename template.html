@@ -3238,55 +3238,215 @@
             box-shadow: 0 8px 18px color-mix(in srgb, var(--canvas) 44%, transparent);
         }
 
-        .ddns-provider-card {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            min-height: 58px;
-            border: 1px solid var(--line) !important;
-            border-radius: 12px !important;
-            padding: 10px 12px !important;
-            background: var(--control-bg) !important;
+        .dns-provider-groups {
+            display: grid;
+            gap: 14px;
         }
 
-        .ddns-provider-card__badge {
+        .dns-provider-group__title {
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .dns-provider-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 8px;
+        }
+
+        .dns-provider-option {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            min-height: 46px;
+            padding: 8px 10px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: var(--control-bg);
+            color: var(--text);
+            text-align: left;
+            font-size: 13px;
+            font-weight: 600;
+            transition: border-color .15s ease, background .15s ease;
+        }
+
+        .dns-provider-option:hover {
+            background: var(--control-hover-bg);
+        }
+
+        .dns-provider-option.active {
+            border-color: var(--accent);
+            background: var(--accent-light);
+            color: var(--accent-strong);
+            box-shadow: inset 0 0 0 1px var(--accent);
+        }
+
+        .dns-provider-option:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .dns-provider-option__badge {
             display: grid;
             place-items: center;
-            width: 32px;
-            height: 32px;
-            flex: 0 0 32px;
-            border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
-            border-radius: 9px;
-            background: color-mix(in srgb, var(--accent-light) 78%, var(--panel));
+            width: 28px;
+            height: 28px;
+            flex: 0 0 28px;
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--accent) 12%, var(--panel));
             color: var(--accent);
-            font-size: 0.68rem;
-            font-weight: 900;
-            letter-spacing: 0.03em;
-        }
-
-        .ddns-provider-card__title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--text);
-            font-size: 0.82rem;
+            font-size: 11px;
             font-weight: 800;
         }
 
-        .ddns-provider-card__tag {
-            border-radius: 999px;
-            padding: 2px 6px;
-            background: color-mix(in srgb, var(--accent) 12%, var(--panel));
-            color: var(--accent);
-            font-size: 0.62rem;
-            font-weight: 700;
+        .dns-provider-option__name {
+            flex: 1;
+            min-width: 0;
         }
 
-        .ddns-provider-card__hint {
-            margin-top: 2px;
+        .dns-provider-option__state {
+            flex: 0 0 auto;
+            color: var(--success-text);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .dns-credential-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px 12px;
+            margin-top: 14px;
+        }
+
+        .dns-credential-grid__wide {
+            grid-column: 1 / -1;
+        }
+
+        .required-mark {
+            margin-left: 3px;
+            color: var(--danger);
+        }
+
+        .dns-domain-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .dns-domain-row .glass-input {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .dns-test-result {
+            margin-top: 10px;
+            padding: 9px 12px;
+            border: 1px solid var(--success-border);
+            border-radius: 10px;
+            background: var(--success-bg);
+            color: var(--success-text);
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+        }
+
+        .dns-test-result.is-error {
+            border-color: var(--danger-border);
+            background: var(--danger-bg);
+            color: var(--danger-text);
+        }
+
+        .dns-cleanup-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .dns-cleanup-head h4 {
+            margin-bottom: 0 !important;
+        }
+
+        .dns-cleanup-list {
+            display: grid;
+            border-top: 1px solid var(--line);
+        }
+
+        .dns-cleanup-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 4px 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--line);
+            font-size: 13px;
+        }
+
+        .dns-cleanup-item__main {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .dns-cleanup-item__ip {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-weight: 600;
+        }
+
+        .dns-cleanup-item__meta,
+        .dns-cleanup-item__message {
+            grid-column: 1;
             color: var(--muted);
-            font-size: 0.7rem;
-            line-height: 1.4;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        .dns-cleanup-item__message {
+            color: var(--text);
+        }
+
+        .dns-cleanup-item > .ghost-button {
+            grid-column: 2;
+            grid-row: 1 / span 3;
+        }
+
+        .dns-cleanup-status {
+            border-radius: 999px;
+            padding: 1px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            background: var(--status-unknown-bg);
+            color: var(--status-unknown-text);
+        }
+
+        .dns-cleanup-status.is-done {
+            background: var(--success-bg);
+            color: var(--success-text);
+        }
+
+        .dns-cleanup-status.is-pending {
+            background: var(--warning-bg);
+            color: var(--warning-text);
+        }
+
+        .dns-cleanup-status.is-failed {
+            background: var(--danger-bg);
+            color: var(--danger-text);
+        }
+
+        @media (max-width: 640px) {
+            .dns-credential-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .dns-domain-row {
+                flex-direction: column;
+            }
         }
 
         .daily-summary-card {
@@ -4970,6 +5130,9 @@
                                         <span v-if="item.status === 'Running' && item.healthStatus === 'Initializing'" class="status-pill status-transition !text-[10px] animate-pulse">
                                             操作系统启动中
                                         </span>
+                                        <span v-if="expiryBadge(item)" class="status-pill !text-[10px]" :class="expiryBadge(item).className" :title="expiryBadge(item).title">
+                                            {{ expiryBadge(item).text }}
+                                        </span>
                                     </div>
                                 </div>
 
@@ -5508,59 +5671,94 @@
                                 </div>
                             </section>
 
-                            <div v-if="currentSettingsTab === 'ddns'" class="metric-card">
-                                <div>
-                                    <p class="subtle-label">DDNS</p>
-                                    <h3 class="mt-1 text-lg font-bold">动态域名解析</h3>
-                                    <p class="mt-2 text-sm leading-6 text-[#6f7787]">
-                                        默认使用 Cloudflare。系统会在 ECS 创建、实例启动后和手动同步时，把公网 IP 写入 A 记录。
-                                    </p>
-                                </div>
-                                <div class="mt-5 space-y-3">
-                                    <label class="switch-row flex items-center justify-between rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
-                                        <span>启用 DDNS</span>
-                                        <span class="switch-control">
-                                            <input type="checkbox" v-model="config.Ddns.enabled">
-                                            <span class="switch-slider"></span>
-                                        </span>
-                                    </label>
-                                    <input type="hidden" v-model="config.Ddns.provider">
-                                    <div class="ddns-provider-card">
-                                        <div class="ddns-provider-card__badge" aria-hidden="true">CF</div>
-                                        <div>
-                                            <div class="ddns-provider-card__title">
-                                                <span>Cloudflare</span>
-                                                <span class="ddns-provider-card__tag">当前提供商</span>
+                            <section v-if="currentSettingsTab === 'ddns'" class="settings-section">
+                                <header class="settings-section__head"><h3>域名解析</h3></header>
+                                <div class="settings-fields">
+                                    <div class="settings-field">
+                                        <span class="field-label">DNS 服务商</span>
+                                        <div class="dns-provider-groups">
+                                            <div v-for="group in dnsProviderGroups" :key="group.key">
+                                                <p class="dns-provider-group__title">{{ group.label }}</p>
+                                                <div class="dns-provider-grid">
+                                                    <button v-for="provider in group.items" :key="provider.id" type="button"
+                                                        class="dns-provider-option" :class="{ active: config.Ddns.provider === provider.id }"
+                                                        :aria-pressed="config.Ddns.provider === provider.id" @click="selectDnsProvider(provider.id)">
+                                                        <span class="dns-provider-option__badge" aria-hidden="true">{{ dnsProviderBadge(provider) }}</span>
+                                                        <span class="dns-provider-option__name">{{ provider.label }}</span>
+                                                        <span v-if="dnsProviderConfigured(provider)" class="dns-provider-option__state">已填写</span>
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div class="ddns-provider-card__hint">当前支持 Cloudflare，后续可扩展其他 DNS 服务商。</div>
                                         </div>
                                     </div>
-                                    <div>
-                                        <label class="mb-2 block text-sm font-semibold text-[#6f7787]">Cloudflare API Token</label>
-                                        <input v-model="config.Ddns.cloudflare.token" type="password" class="glass-input" placeholder="需要 Zone DNS Edit 权限">
-                                    </div>
-                                    <div class="two-col-grid">
-                                        <div>
-                                            <label class="mb-2 block text-sm font-semibold text-[#6f7787]">根域名</label>
-                                            <input v-model="config.Ddns.domain" class="glass-input" placeholder="例如 example.com">
+
+                                    <div v-if="currentDnsProvider" class="settings-subsection">
+                                        <h4>{{ currentDnsProvider.label }} 凭据</h4>
+                                        <p class="settings-hint">{{ currentDnsProvider.hint }}</p>
+                                        <div class="dns-credential-grid">
+                                            <template v-for="field in currentDnsProvider.fields" :key="`${currentDnsProvider.id}-${field.key}`">
+                                                <label v-if="field.type === 'switch'" class="settings-toggle dns-credential-grid__wide">
+                                                    <span><span>{{ field.label }}</span><span v-if="field.hint" class="settings-hint">{{ field.hint }}</span></span>
+                                                    <span class="switch-control"><input type="checkbox" v-model="currentDnsCredentials[field.key]"><span class="switch-slider"></span></span>
+                                                </label>
+                                                <div v-else class="settings-field" :class="{ 'dns-credential-grid__wide': field.type === 'select' }">
+                                                    <label v-if="field.type !== 'select'" :for="`dns-field-${field.key}`">{{ field.label }}<span v-if="field.required" class="required-mark" aria-hidden="true">*</span></label>
+                                                    <span v-else class="field-label">{{ field.label }}</span>
+                                                    <app-select v-if="field.type === 'select'" v-model="currentDnsCredentials[field.key]" class="glass-select" :options="field.options"></app-select>
+                                                    <input v-else :id="`dns-field-${field.key}`" v-model.trim="currentDnsCredentials[field.key]"
+                                                        :type="field.type === 'secret' ? 'password' : 'text'" class="glass-input" autocomplete="off" spellcheck="false"
+                                                        :placeholder="field.type === 'secret' && dnsSavedSecrets[currentDnsProvider.id]?.[field.key] ? '已保存，留空则不修改' : (field.placeholder || '')">
+                                                    <p v-if="field.hint" class="settings-hint">{{ field.hint }}</p>
+                                                </div>
+                                            </template>
                                         </div>
-                                        <div>
-                                            <label class="mb-2 block text-sm font-semibold text-[#6f7787]">Zone ID（可选）</label>
-                                            <input v-model="config.Ddns.cloudflare.zone_id" class="glass-input" placeholder="留空时自动查询">
-                                        </div>
                                     </div>
-                                    <label class="switch-row flex items-center justify-between rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
-                                        <span>开启 Cloudflare 代理</span>
-                                        <span class="switch-control">
-                                            <input type="checkbox" v-model="config.Ddns.cloudflare.proxied">
-                                            <span class="switch-slider"></span>
-                                        </span>
-                                    </label>
-                                    <p class="text-xs leading-6 text-[var(--muted)]">
-                                        必填：API Token 和根域名。Zone ID 可不填，系统会根据根域名自动查询。命名规则：单机器使用“账号备注.根域名”；同账号多机器使用“账号备注-实例备注或实例短 ID.根域名”。
-                                    </p>
+
+                                    <div class="settings-field">
+                                        <label for="dns-domain">根域名</label>
+                                        <div class="dns-domain-row">
+                                            <input id="dns-domain" v-model.trim="config.Ddns.domain" class="glass-input" placeholder="例如 example.com" autocomplete="off" spellcheck="false">
+                                            <button type="button" class="ghost-button" @click="testDnsProvider" :disabled="testingDns || !currentDnsProvider">{{ testingDns ? '测试中...' : '测试连接' }}</button>
+                                        </div>
+                                        <p class="settings-hint">自动解析在这个域名下创建记录，清理也只处理这个域名。测试会使用当前填写的内容，无需先保存。</p>
+                                        <div v-if="dnsTestResult" class="dns-test-result" :class="{ 'is-error': !dnsTestResult.success }" role="status">{{ dnsTestResult.message }}</div>
+                                    </div>
+
+                                    <div class="settings-subsection">
+                                        <h4>自动化</h4>
+                                        <label class="settings-toggle">
+                                            <span><span>实例失效时自动删除解析</span><span class="settings-hint">包年包月到期、实例被释放或回收、更换公网 IP 后，删除指向旧 IP 的 A 记录（含手动添加的记录）。多 IP 记录只移除该 IP；IP 仍被其他在用实例使用时跳过。</span></span>
+                                            <span class="switch-control"><input type="checkbox" v-model="config.Ddns.cleanup_enabled"><span class="switch-slider"></span></span>
+                                        </label>
+                                        <p v-if="config.Ddns.cleanup_enabled && !config.Ddns.domain" class="settings-warning">没有填写根域名，清理会检查这个服务商账号下的全部域名。</p>
+                                        <label class="settings-toggle">
+                                            <span><span>自动把实例 IP 写入解析（DDNS）</span><span class="settings-hint">创建实例、开机和同步时更新 A 记录。单台机器用「账号备注.根域名」，同账号多台用「账号备注-实例名.根域名」。</span></span>
+                                            <span class="switch-control"><input type="checkbox" v-model="config.Ddns.enabled"><span class="switch-slider"></span></span>
+                                        </label>
+                                        <p v-if="config.Ddns.enabled && !config.Ddns.domain" class="settings-warning">DDNS 需要填写根域名才会生效。</p>
+                                    </div>
+
+                                    <div class="settings-subsection">
+                                        <div class="dns-cleanup-head">
+                                            <h4>清理记录</h4>
+                                            <button type="button" class="ghost-button" @click="fetchDnsCleanupTasks" :disabled="dnsCleanupLoading">{{ dnsCleanupLoading ? '加载中...' : '刷新' }}</button>
+                                        </div>
+                                        <p v-if="!dnsCleanupTasks.length" class="settings-hint">还没有清理记录。实例失效后会在这里显示处理结果。</p>
+                                        <ul v-else class="dns-cleanup-list">
+                                            <li v-for="task in dnsCleanupTasks" :key="task.id" class="dns-cleanup-item">
+                                                <div class="dns-cleanup-item__main">
+                                                    <span class="dns-cleanup-item__ip">{{ task.ip }}</span>
+                                                    <span class="dns-cleanup-status" :class="`is-${task.status}`">{{ dnsCleanupStatusText(task) }}</span>
+                                                </div>
+                                                <p class="dns-cleanup-item__meta">{{ task.label || task.instanceId || '未知实例' }} · {{ task.reasonText }} · {{ task.updatedAt }}</p>
+                                                <p v-if="task.message" class="dns-cleanup-item__message">{{ task.message }}</p>
+                                                <button v-if="task.status === 'failed' || task.status === 'skipped'" type="button" class="ghost-button"
+                                                    @click="retryDnsCleanup(task)" :disabled="retryingDnsCleanup === task.id">{{ retryingDnsCleanup === task.id ? '提交中...' : task.status === 'failed' ? '重试' : '重新执行' }}</button>
+                                            </li>
+                                        </ul>
+                                    </div>
                                 </div>
-                            </div>
+                            </section>
 
                             <div v-if="currentSettingsTab === 'notifications'" class="metric-card">
                                 <div class="tab-pill-group">
@@ -6836,13 +7034,10 @@
                     },
                     Ddns: {
                         enabled: false,
+                        cleanup_enabled: false,
                         provider: 'cloudflare',
                         domain: '',
-                        cloudflare: {
-                            zone_id: '',
-                            token: '',
-                            proxied: false
-                        }
+                        credentials: {}
                     },
                     Notification: {
                         email_enabled: true,
@@ -7017,6 +7212,13 @@
                 const statusSyncInterval = ref(600);
                 const sendingEmail = ref(false);
                 const testingTelegram = ref(false);
+                const dnsProviders = ref([]);
+                const dnsSavedSecrets = ref({});
+                const testingDns = ref(false);
+                const dnsTestResult = ref(null);
+                const dnsCleanupTasks = ref([]);
+                const dnsCleanupLoading = ref(false);
+                const retryingDnsCleanup = ref('');
                 const testingWebhook = ref(false);
                 const uploadingLogo = ref(false);
                 const checkingUpdate = ref(false);
@@ -7554,6 +7756,15 @@
                     return items;
                 });
 
+                const buildDnsCredentials = (provider, saved = {}) => {
+                    const values = {};
+                    for (const field of provider.fields || []) {
+                        const value = saved?.[field.key];
+                        values[field.key] = field.type === 'switch' ? !!value : String(value ?? '') || field.default || '';
+                    }
+                    return values;
+                };
+
                 const normalizeConfig = (payload) => {
                     const next = createDefaultConfig();
                     Object.assign(next, payload || {});
@@ -7572,14 +7783,18 @@
                         ...next.AppBrand,
                         ...(payload?.AppBrand || {})
                     };
+                    const ddns = payload?.Ddns || {};
                     next.Ddns = {
-                        ...next.Ddns,
-                        ...(payload?.Ddns || {}),
-                        cloudflare: {
-                            ...next.Ddns.cloudflare,
-                            ...(payload?.Ddns?.cloudflare || {})
-                        }
+                        enabled: !!ddns.enabled,
+                        cleanup_enabled: !!ddns.cleanup_enabled,
+                        provider: ddns.provider || 'cloudflare',
+                        domain: ddns.domain || '',
+                        credentials: {}
                     };
+                    for (const provider of payload?.DnsProviders || []) {
+                        next.Ddns.credentials[provider.id] = buildDnsCredentials(provider, ddns.credentials?.[provider.id]);
+                    }
+                    delete next.DnsProviders;
                     next.Accounts = Array.isArray(payload?.Accounts) ? payload.Accounts.map((item) => ({
                         ...createDefaultAccount(),
                         ...item
@@ -7656,6 +7871,10 @@
                     try {
                         const res = await fetch('index.php?action=get_config');
                         const data = await res.json();
+                        dnsProviders.value = Array.isArray(data.DnsProviders) ? data.DnsProviders : [];
+                        dnsSavedSecrets.value = Object.fromEntries(dnsProviders.value.map((provider) => [provider.id, Object.fromEntries(
+                            provider.fields.filter((field) => field.type === 'secret' && data.Ddns?.credentials?.[provider.id]?.[field.key] === '********').map((field) => [field.key, true])
+                        )]));
                         config.value = normalizeConfig(data);
                         passwordLoginEnabled.value = data.password_login_enabled !== false;
                         passkeyCount.value = Number(data.passkey_count || 0);
@@ -8981,6 +9200,106 @@
                     }
                 };
 
+                const dnsProviderBadges = { aliyun: '阿里', dnspod: 'DP', huawei: '华为', cloudflare: 'CF', route53: 'R53', namesilo: 'NS', porkbun: 'PB', godaddy: 'GD', digitalocean: 'DO' };
+                const dnsProviderBadge = (provider) => dnsProviderBadges[provider.id] || provider.label.slice(0, 2);
+
+                const dnsProviderGroups = computed(() => [
+                    { key: 'cn', label: '国内' },
+                    { key: 'global', label: '海外' }
+                ].map((group) => ({ ...group, items: dnsProviders.value.filter((provider) => provider.market === group.key) }))
+                    .filter((group) => group.items.length));
+
+                const currentDnsProvider = computed(() => dnsProviders.value.find((provider) => provider.id === config.value.Ddns.provider) || null);
+                const currentDnsCredentials = computed(() => config.value.Ddns.credentials[config.value.Ddns.provider] || {});
+
+                const dnsProviderConfigured = (provider) => {
+                    const values = config.value.Ddns.credentials[provider.id] || {};
+                    return (provider.fields || []).every((field) => !field.required || String(values[field.key] || '').trim() !== '');
+                };
+
+                const selectDnsProvider = (id) => {
+                    const provider = dnsProviders.value.find((item) => item.id === id);
+                    if (!provider) return;
+                    if (!config.value.Ddns.credentials[id]) {
+                        config.value.Ddns.credentials[id] = buildDnsCredentials(provider);
+                    }
+                    config.value.Ddns.provider = id;
+                    dnsTestResult.value = null;
+                };
+
+                const testDnsProvider = async () => {
+                    const provider = currentDnsProvider.value;
+                    if (!provider) return;
+                    const missing = provider.fields.filter((field) => field.required && !String(currentDnsCredentials.value[field.key] || '').trim());
+                    if (missing.length) {
+                        dnsTestResult.value = { success: false, message: `请先填写 ${missing.map((field) => field.label).join('、')}` };
+                        return;
+                    }
+                    testingDns.value = true;
+                    dnsTestResult.value = null;
+                    try {
+                        const res = await fetch('index.php?action=test_dns', {
+                            method: 'POST',
+                            body: JSON.stringify({ Ddns: config.value.Ddns })
+                        });
+                        const data = await res.json();
+                        dnsTestResult.value = {
+                            success: !!data.success,
+                            message: data.success ? `${data.message} 清理范围：${data.scope}。` : (data.message || '测试失败')
+                        };
+                    } catch (error) {
+                        console.error(error);
+                        dnsTestResult.value = { success: false, message: '测试请求失败，请检查网络' };
+                    } finally {
+                        testingDns.value = false;
+                    }
+                };
+
+                const fetchDnsCleanupTasks = async () => {
+                    dnsCleanupLoading.value = true;
+                    try {
+                        const res = await fetch('index.php?action=get_dns_cleanup_tasks');
+                        const data = await res.json();
+                        if (data.success) {
+                            dnsCleanupTasks.value = data.data || [];
+                        }
+                    } catch (error) {
+                        console.error('Fetch DNS cleanup tasks failed', error);
+                    } finally {
+                        dnsCleanupLoading.value = false;
+                    }
+                };
+
+                const retryDnsCleanup = async (task) => {
+                    retryingDnsCleanup.value = task.id;
+                    try {
+                        const res = await fetch('index.php?action=retry_dns_cleanup', {
+                            method: 'POST',
+                            body: JSON.stringify({ id: task.id })
+                        });
+                        const data = await res.json();
+                        openAlert(data.message || (data.success ? '已重新加入队列' : '操作失败'), data.success ? 'success' : 'error');
+                        await fetchDnsCleanupTasks();
+                        if (data.success) {
+                            setTimeout(fetchDnsCleanupTasks, 4000);
+                        }
+                    } catch (error) {
+                        console.error(error);
+                        openAlert('请求失败', 'error');
+                    } finally {
+                        retryingDnsCleanup.value = '';
+                    }
+                };
+
+                const dnsCleanupStatusText = (task) => {
+                    switch (task.status) {
+                        case 'done': return '已清理';
+                        case 'skipped': return '已跳过';
+                        case 'failed': return '失败';
+                        default: return task.attempts > 0 ? `重试中 · 第 ${task.attempts} 次` : '排队中';
+                    }
+                };
+
                 const passkeyBase64urlToBuffer = (value) => {
                     const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
                     const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
@@ -9268,6 +9587,17 @@
                     return 'status-unknown';
                 };
 
+                // Prepaid instances: flag the last week before expiry and anything past it.
+                const expiryBadge = (item) => {
+                    if (item.chargeType !== 'PrePaid' || !item.expiredAt) return null;
+                    const date = new Date(item.expiredAt * 1000);
+                    const title = `包年包月，到期时间 ${date.toLocaleString('zh-CN', { hour12: false })}`;
+                    if (item.expired) return { text: '已到期', className: 'status-stopped', title };
+                    const days = Math.ceil((item.expiredAt * 1000 - Date.now()) / 86400000);
+                    if (days > 7) return null;
+                    return { text: days <= 1 ? '1 天内到期' : `${days} 天后到期`, className: 'status-transition', title };
+                };
+
                 const statusText = (status) => ({
                     Running: '运行中',
                     Stopped: '已停止',
@@ -9323,6 +9653,11 @@
 
                 watch(currentMenu, syncCurrentMenu);
                 watch([currentMenu, currentSettingsTab, currentNotifyTab, currentLogTab], persistNavigationState);
+                watch([currentMenu, currentSettingsTab, isAdmin], ([menu, tab, admin]) => {
+                    if (menu === 'settings' && tab === 'ddns' && admin) {
+                        fetchDnsCleanupTasks();
+                    }
+                }, { immediate: true });
 
                 watch(isAdmin, async (value) => {
                     if (value) {
@@ -9503,6 +9838,22 @@
                     systemLogs,
                     testingTelegram,
                     testingWebhook,
+                    dnsProviderGroups,
+                    currentDnsProvider,
+                    currentDnsCredentials,
+                    dnsSavedSecrets,
+                    dnsProviderBadge,
+                    dnsProviderConfigured,
+                    selectDnsProvider,
+                    testingDns,
+                    dnsTestResult,
+                    testDnsProvider,
+                    dnsCleanupTasks,
+                    dnsCleanupLoading,
+                    fetchDnsCleanupTasks,
+                    retryingDnsCleanup,
+                    retryDnsCleanup,
+                    dnsCleanupStatusText,
                     uploadingLogo,
                     checkingUpdate,
                     startingUpdate,
@@ -9549,6 +9900,7 @@
                     testAccountDraft,
                     statusClass,
                     statusText,
+                    expiryBadge,
                     logTypeLabel,
                     syncAccount,
                     toasts,

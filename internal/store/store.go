@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Kori1c/ecs-controller/internal/app"
+	"github.com/Kori1c/ecs-controller/internal/dns"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/nacl/secretbox"
@@ -189,6 +190,7 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS telegram_action_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL, chat_id TEXT NOT NULL, action TEXT NOT NULL, account_id INTEGER NOT NULL, payload TEXT DEFAULT '', expires_at INTEGER NOT NULL, used_at INTEGER DEFAULT 0, created_at INTEGER NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS passkey_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, credential_id TEXT UNIQUE NOT NULL, credential_data TEXT NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS passkey_challenges (id TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT DEFAULT '', session_data TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS instance_expiry (instance_id TEXT PRIMARY KEY, charge_type TEXT DEFAULT '', expired_at INTEGER DEFAULT 0, queued_at INTEGER DEFAULT 0, updated_at INTEGER DEFAULT 0)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.DB.Exec(statement); err != nil {
@@ -211,6 +213,7 @@ func (s *Store) migrate() error {
 		{"ecs_create_tasks", "eip_allocation_id", "TEXT DEFAULT ''"},
 		{"ecs_create_tasks", "eip_address", "TEXT DEFAULT ''"},
 		{"ecs_create_tasks", "eip_managed", "INTEGER DEFAULT 0"},
+		{"jobs", "result", "TEXT DEFAULT ''"},
 	} {
 		if spec.column == "account_key_placeholder" {
 			continue
@@ -378,7 +381,7 @@ func (s *Store) migratePlaintextSecrets() error {
 		}
 	}
 
-	for _, key := range []string{"notify_password", "notify_tg_token", "notify_tg_proxy_pass", "ddns_cf_token"} {
+	for _, key := range append([]string{"notify_password", "notify_tg_token", "notify_tg_proxy_pass"}, dns.SecretSettingKeys()...) {
 		var value string
 		err := s.DB.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&value)
 		if errors.Is(err, sql.ErrNoRows) || value == "" || strings.HasPrefix(value, "ENC1") {

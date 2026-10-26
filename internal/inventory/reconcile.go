@@ -133,6 +133,7 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 		if err := st.UpsertAccount(a); err != nil {
 			return result, err
 		}
+		trackExpiry(st, instance, a, now)
 	}
 
 	purgedKeys := make(map[string]struct{})
@@ -180,6 +181,13 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 		}
 		result.Purged++
 		st.AddLog("info", "已彻底清理云端不存在的实例记录")
+		// The instance is gone (expired and released, spot-reclaimed or deleted
+		// in the console), so its IP no longer belongs to us.
+		if account.IsDeleted == 0 {
+			if _, enqueueErr := st.EnqueueAccountDNSCleanup(account, "vanished"); enqueueErr != nil {
+				st.AddLog("warning", "实例已消失，但解析清理任务入队失败: "+enqueueErr.Error())
+			}
+		}
 		if st.GetSetting("ddns_enabled", "0") == "1" {
 			jobID := fmt.Sprintf("inventory-ddns-%s-%d", account.InstanceID, now.UnixNano())
 			payload := map[string]any{"account": ddnsPayloadAccount(account), "before": ddnsPayloadAccounts(accounts)}
@@ -193,6 +201,26 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 		_ = st.SetSetting("last_ddns_reconcile", "0")
 	}
 	return result, nil
+}
+
+// trackExpiry records a prepaid instance's expiry and, the first time it is
+// seen expired, queues its public IP for DNS cleanup. A renewal resets the
+// marker so a later expiry is handled again.
+func trackExpiry(st *store.Store, instance cloud.Instance, account app.Account, now time.Time) {
+	expiry := st.InstanceExpiry(instance.ID)
+	expiry.ChargeType = instance.ChargeType
+	expiry.ExpiredAt = instance.ExpiresAt()
+	if !expiry.Expired(now) {
+		expiry.QueuedAt = 0
+	} else if expiry.QueuedAt == 0 {
+		queued, err := st.EnqueueAccountDNSCleanup(account, "expired")
+		if err != nil {
+			st.AddLog("warning", "包年包月实例已到期，但解析清理任务入队失败: "+err.Error())
+		} else if queued {
+			expiry.QueuedAt = now.Unix()
+		}
+	}
+	_ = st.SaveInstanceExpiry(expiry)
 }
 
 func sameInstance(left, right app.Account) bool {

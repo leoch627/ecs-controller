@@ -22,6 +22,10 @@ type Instance struct {
 	Memory            int    `json:"memory"`
 	OSName            string `json:"osName"`
 	InternetBandwidth int    `json:"internetMaxBandwidthOut"`
+	// ChargeType is PrePaid or PostPaid; ExpiredTime is only meaningful for
+	// PrePaid instances (PostPaid ones report a far-future date).
+	ChargeType  string `json:"instanceChargeType"`
+	ExpiredTime string `json:"expiredTime"`
 }
 
 type RunRequest struct {
@@ -1194,7 +1198,23 @@ func instanceFromMap(m map[string]any) Instance {
 		Memory:            firstInt(m, "Memory", "MemorySize", "MemoryMB", "MemorySizeInMB"),
 		OSName:            firstString(m, "OSName", "OSNameEn", "OSNameZh"),
 		InternetBandwidth: firstInt(m, "InternetMaxBandwidthOut"),
+		ChargeType:        stringValue(m["InstanceChargeType"]),
+		ExpiredTime:       stringValue(m["ExpiredTime"]),
 	}
+}
+
+// ExpiresAt parses ExpiredTime (e.g. 2026-11-01T16:00Z) for PrePaid instances.
+// It returns 0 for PostPaid instances or an unparseable time.
+func (i Instance) ExpiresAt() int64 {
+	if i.ChargeType != "PrePaid" {
+		return 0
+	}
+	for _, layout := range []string{"2006-01-02T15:04Z", time.RFC3339, "2006-01-02T15:04:05Z"} {
+		if t, err := time.Parse(layout, strings.TrimSpace(i.ExpiredTime)); err == nil {
+			return t.Unix()
+		}
+	}
+	return 0
 }
 
 func firstIP(root map[string]any, keys ...string) string {
