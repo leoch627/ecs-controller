@@ -4,6 +4,25 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Compose reads .env on its own, but the exported defaults below would take
+# precedence over it, so a fork's image repository in .env was ignored. Load
+# .env first; variables already set in the shell still win, as with Compose.
+if [[ -f .env ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+        line="${line#export }"
+        key="${line%%=*}"
+        value="${line#*=}"
+        [[ "$line" == *=* && "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        [[ -n "${!key+set}" ]] && continue
+        if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then
+            value="${BASH_REMATCH[1]}"
+        fi
+        export "$key=$value"
+    done < .env
+fi
+
 # Pass the checked-out revision into the image so the UI can compare it with
 # GitHub. The compose project name also lets the updater address this stack
 # when the repository lives outside the default installation directory.
