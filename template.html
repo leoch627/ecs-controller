@@ -9,7 +9,7 @@
     <link id="app-favicon" rel="icon" type="image/png" href="icon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="static/tailwind-compiled.css?v=__ASSET_VERSION__">
     <script>
         // 自动跟随系统主题
@@ -22,161 +22,165 @@
     </script>
     <style>
         :root {
-            --canvas: #edf4f8;
-            --panel: #f9fcfe;
-            --panel-strong: #e5eff5;
-            --line: #d3e0e8;
-            --text: #102a43;
-            --muted: #5d7487;
-            --accent: #0f7894;
-            --accent-strong: #0b6078;
-            --accent-light: #dff3f7;
-            --danger: #d65d6a;
-            --warning: #c88a35;
-            --success: #0b9687;
-            --danger-bg: #fff2f4;
-            --danger-border: #f1c2ca;
-            --danger-text: #b23a50;
-            --warning-bg: #fff8ec;
-            --warning-border: #efd9a9;
-            --warning-text: #9a661f;
-            --success-bg: #eafaf6;
-            --success-border: #b9e4d9;
-            --success-text: #087d6f;
-            --status-running-bg: #eafaf6;
-            --status-running-text: #087d6f;
-            --status-stopped-bg: #fff2f4;
-            --status-stopped-text: #b23a50;
-            --status-transition-bg: #fff8ec;
-            --status-transition-text: #9a661f;
-            --status-unknown-bg: #eef3f6;
-            --status-unknown-text: #5d7487;
-            --hover-bg: #eef5f8;
-            --control-bg: #f4f8fa;
-            --control-hover-bg: #eaf2f6;
-            --switch-on-bg: #0f7894;
-            --accent-contrast: #ffffff;
-            --input-bg: #f8fbfd;
-            --glass-input-border: #c5d6e1;
+            --canvas: #fafafa;
+            --panel: #ffffff;
+            --panel-strong: #f4f4f5;
+            --line: #e4e4e7;
+            --ring: #a1a1aa;
+            --text: #09090b;
+            --muted: #71717a;
+            --accent: #18181b;
+            --accent-strong: #27272a;
+            --accent-light: #f4f4f5;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --success: #16a34a;
+            --danger-bg: #fef2f2;
+            --danger-border: #fecaca;
+            --danger-text: #b91c1c;
+            --warning-bg: #fffbeb;
+            --warning-border: #fde68a;
+            --warning-text: #b45309;
+            --success-bg: #f0fdf4;
+            --success-border: #bbf7d0;
+            --success-text: #15803d;
+            --status-running-bg: #f0fdf4;
+            --status-running-text: #15803d;
+            --status-stopped-bg: #fef2f2;
+            --status-stopped-text: #b91c1c;
+            --status-transition-bg: #fffbeb;
+            --status-transition-text: #b45309;
+            --status-unknown-bg: #f4f4f5;
+            --status-unknown-text: #52525b;
+            --hover-bg: #f4f4f5;
+            --control-bg: #ffffff;
+            --control-hover-bg: #f4f4f5;
+            --switch-on-bg: #18181b;
+            --accent-contrast: #fafafa;
+            --input-bg: #ffffff;
+            --glass-input-border: #e4e4e7;
         }
 
         @media (prefers-color-scheme: dark) {
             :root {
-                --canvas: #0b1724;
-                --panel: #12283b;
-                --panel-strong: #19384d;
-                --line: #2b4a60;
-                --text: #e8f2f7;
-                --muted: #91abba;
-                --accent: #5cc4d8;
-                --accent-strong: #38a8c1;
-                --accent-light: #163f50;
-                --danger: #f07b88;
-                --warning: #e4b05e;
-                --success: #62d1bf;
-                --danger-bg: #3b2932;
-                --danger-border: #704650;
-                --danger-text: #f2b5c0;
-                --warning-bg: #3b3227;
-                --warning-border: #6d5a3c;
-                --warning-text: #edcf98;
-                --success-bg: #183d3c;
-                --success-border: #2b7068;
-                --success-text: #93dfd1;
-                --input-bg: #102235;
-                --glass-input-border: #36586e;
-                --status-running-bg: #183d3c;
-                --status-running-text: #93dfd1;
-                --status-stopped-bg: #3b2932;
-                --status-stopped-text: #f2b5c0;
-                --status-transition-bg: #3b3227;
-                --status-transition-text: #edcf98;
-                --status-unknown-bg: #263c4d;
-                --status-unknown-text: #a5bac7;
-                --hover-bg: #1b3a50;
-                --control-bg: #172f43;
-                --control-hover-bg: #1e3c50;
-                --switch-on-bg: #3f9eb0;
-                --accent-contrast: #082631;
+                --canvas: #09090b;
+                --panel: #18181b;
+                --panel-strong: #27272a;
+                --line: #27272a;
+                --ring: #71717a;
+                --text: #fafafa;
+                --muted: #a1a1aa;
+                --accent: #fafafa;
+                --accent-strong: #e4e4e7;
+                --accent-light: #27272a;
+                --danger: #f87171;
+                --warning: #fbbf24;
+                --success: #4ade80;
+                --danger-bg: #2a1314;
+                --danger-border: #5c1d1d;
+                --danger-text: #fca5a5;
+                --warning-bg: #2a1f0d;
+                --warning-border: #5c4310;
+                --warning-text: #fcd34d;
+                --success-bg: #0d2216;
+                --success-border: #14532d;
+                --success-text: #86efac;
+                --input-bg: #1c1c1f;
+                --glass-input-border: #3f3f46;
+                --status-running-bg: #0d2216;
+                --status-running-text: #86efac;
+                --status-stopped-bg: #2a1314;
+                --status-stopped-text: #fca5a5;
+                --status-transition-bg: #2a1f0d;
+                --status-transition-text: #fcd34d;
+                --status-unknown-bg: #27272a;
+                --status-unknown-text: #a1a1aa;
+                --hover-bg: #27272a;
+                --control-bg: #18181b;
+                --control-hover-bg: #27272a;
+                --switch-on-bg: #fafafa;
+                --accent-contrast: #18181b;
             }
         }
 
         [data-theme="light"] {
-            --canvas: #edf4f8;
-            --panel: #f9fcfe;
-            --panel-strong: #e5eff5;
-            --line: #d3e0e8;
-            --text: #102a43;
-            --muted: #5d7487;
-            --accent: #0f7894;
-            --accent-strong: #0b6078;
-            --accent-light: #dff3f7;
-            --danger: #d65d6a;
-            --warning: #c88a35;
-            --success: #0b9687;
-            --danger-bg: #fff2f4;
-            --danger-border: #f1c2ca;
-            --danger-text: #b23a50;
-            --warning-bg: #fff8ec;
-            --warning-border: #efd9a9;
-            --warning-text: #9a661f;
-            --success-bg: #eafaf6;
-            --success-border: #b9e4d9;
-            --success-text: #087d6f;
-            --status-running-bg: #eafaf6;
-            --status-running-text: #087d6f;
-            --status-stopped-bg: #fff2f4;
-            --status-stopped-text: #b23a50;
-            --status-transition-bg: #fff8ec;
-            --status-transition-text: #9a661f;
-            --status-unknown-bg: #eef3f6;
-            --status-unknown-text: #5d7487;
-            --hover-bg: #eef5f8;
-            --control-bg: #f4f8fa;
-            --control-hover-bg: #eaf2f6;
-            --switch-on-bg: #0f7894;
-            --accent-contrast: #ffffff;
-            --input-bg: #f8fbfd;
-            --glass-input-border: #c5d6e1;
+            --canvas: #fafafa;
+            --panel: #ffffff;
+            --panel-strong: #f4f4f5;
+            --line: #e4e4e7;
+            --ring: #a1a1aa;
+            --text: #09090b;
+            --muted: #71717a;
+            --accent: #18181b;
+            --accent-strong: #27272a;
+            --accent-light: #f4f4f5;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --success: #16a34a;
+            --danger-bg: #fef2f2;
+            --danger-border: #fecaca;
+            --danger-text: #b91c1c;
+            --warning-bg: #fffbeb;
+            --warning-border: #fde68a;
+            --warning-text: #b45309;
+            --success-bg: #f0fdf4;
+            --success-border: #bbf7d0;
+            --success-text: #15803d;
+            --status-running-bg: #f0fdf4;
+            --status-running-text: #15803d;
+            --status-stopped-bg: #fef2f2;
+            --status-stopped-text: #b91c1c;
+            --status-transition-bg: #fffbeb;
+            --status-transition-text: #b45309;
+            --status-unknown-bg: #f4f4f5;
+            --status-unknown-text: #52525b;
+            --hover-bg: #f4f4f5;
+            --control-bg: #ffffff;
+            --control-hover-bg: #f4f4f5;
+            --switch-on-bg: #18181b;
+            --accent-contrast: #fafafa;
+            --input-bg: #ffffff;
+            --glass-input-border: #e4e4e7;
         }
 
         [data-theme="dark"] {
-            --canvas: #0b1724;
-            --panel: #12283b;
-            --panel-strong: #19384d;
-            --line: #2b4a60;
-            --text: #e8f2f7;
-            --muted: #91abba;
-            --accent: #5cc4d8;
-            --accent-strong: #38a8c1;
-            --accent-light: #163f50;
-            --danger: #f07b88;
-            --warning: #e4b05e;
-            --success: #62d1bf;
-            --danger-bg: #3b2932;
-            --danger-border: #704650;
-            --danger-text: #f2b5c0;
-            --warning-bg: #3b3227;
-            --warning-border: #6d5a3c;
-            --warning-text: #edcf98;
-            --success-bg: #183d3c;
-            --success-border: #2b7068;
-            --success-text: #93dfd1;
-            --input-bg: #102235;
-            --glass-input-border: #36586e;
-            --status-running-bg: #183d3c;
-            --status-running-text: #93dfd1;
-            --status-stopped-bg: #3b2932;
-            --status-stopped-text: #f2b5c0;
-            --status-transition-bg: #3b3227;
-            --status-transition-text: #edcf98;
-            --status-unknown-bg: #263c4d;
-            --status-unknown-text: #a5bac7;
-            --hover-bg: #1b3a50;
-            --control-bg: #172f43;
-            --control-hover-bg: #1e3c50;
-            --switch-on-bg: #3f9eb0;
-            --accent-contrast: #082631;
+            --canvas: #09090b;
+            --panel: #18181b;
+            --panel-strong: #27272a;
+            --line: #27272a;
+            --ring: #71717a;
+            --text: #fafafa;
+            --muted: #a1a1aa;
+            --accent: #fafafa;
+            --accent-strong: #e4e4e7;
+            --accent-light: #27272a;
+            --danger: #f87171;
+            --warning: #fbbf24;
+            --success: #4ade80;
+            --danger-bg: #2a1314;
+            --danger-border: #5c1d1d;
+            --danger-text: #fca5a5;
+            --warning-bg: #2a1f0d;
+            --warning-border: #5c4310;
+            --warning-text: #fcd34d;
+            --success-bg: #0d2216;
+            --success-border: #14532d;
+            --success-text: #86efac;
+            --input-bg: #1c1c1f;
+            --glass-input-border: #3f3f46;
+            --status-running-bg: #0d2216;
+            --status-running-text: #86efac;
+            --status-stopped-bg: #2a1314;
+            --status-stopped-text: #fca5a5;
+            --status-transition-bg: #2a1f0d;
+            --status-transition-text: #fcd34d;
+            --status-unknown-bg: #27272a;
+            --status-unknown-text: #a1a1aa;
+            --hover-bg: #27272a;
+            --control-bg: #18181b;
+            --control-hover-bg: #27272a;
+            --switch-on-bg: #fafafa;
+            --accent-contrast: #18181b;
         }
 
         /* 暗色模式 Tailwind 类覆盖 */
@@ -728,7 +732,7 @@
         .menu-button.active .menu-index {
             border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
             background: var(--accent);
-            color: #fff;
+            color: var(--accent-contrast);
         }
 
         .menu-label {
@@ -1405,7 +1409,7 @@
 
         .time-picker__item.active {
             background: var(--accent);
-            color: #fff;
+            color: var(--accent-contrast);
         }
 
         .time-picker__actions {
@@ -1436,12 +1440,12 @@
 
         .time-picker__confirm {
             background: var(--accent);
-            color: #fff;
+            color: var(--accent-contrast);
         }
 
         .time-picker__confirm:hover {
             background: var(--accent-strong);
-            color: #fff;
+            color: var(--accent-contrast);
         }
 
         .account-row {
@@ -1834,7 +1838,7 @@
 
         .account-billing__details-button:hover {
             background: var(--accent);
-            color: #fff;
+            color: var(--accent-contrast);
             transform: translateY(-1px);
         }
 
@@ -2561,7 +2565,7 @@
             flex: 0 0 62px;
             border-radius: 18px;
             background: var(--accent-strong);
-            color: #ffffff;
+            color: var(--accent-contrast);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -4205,7 +4209,7 @@
 
         .text-dark-button {
             background: var(--accent) !important;
-            color: #fff !important;
+            color: var(--accent-contrast) !important;
         }
 
         [data-theme="dark"] .text-dark-button {
@@ -4983,6 +4987,477 @@
                 flex: 1 1 auto;
             }
         }
+
+        /* shadcn/ui 风格层：只覆盖视觉（圆角、配色、阴影、字重），不改布局 */
+        :root {
+            --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+            --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            --focus-ring: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
+        }
+
+        body {
+            background: var(--canvas);
+            font-family: var(--font-sans);
+            letter-spacing: normal;
+        }
+
+        .font-mono,
+        .menu-index {
+            font-family: var(--font-mono);
+        }
+
+        /* 卡片 */
+        .glass-panel,
+        .metric-card,
+        .table-shell {
+            border: 1px solid var(--line);
+            background: var(--panel);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .metric-card:hover {
+            box-shadow: var(--shadow-xs);
+        }
+
+        .page-header,
+        .sidebar-panel,
+        .section-panel,
+        .metric-card,
+        .table-shell {
+            border-radius: 12px;
+        }
+
+        .page-header {
+            background: var(--panel);
+        }
+
+        .page-header::after,
+        .toast-card::before,
+        .toast-card::after,
+        .about-hero::after {
+            display: none;
+        }
+
+        .brand-logo,
+        .brand-logo-preview,
+        .auth-brand__logo {
+            border-radius: 10px;
+            box-shadow: none;
+        }
+
+        .brand-logo-fallback {
+            border-radius: 10px;
+            background: var(--accent);
+            color: var(--accent-contrast);
+        }
+
+        .brand-copy__eyebrow,
+        .auth-brand__eyebrow {
+            color: var(--muted);
+            font-weight: 500;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        .brand-copy__title,
+        .auth-brand__title {
+            font-weight: 600;
+            letter-spacing: -0.025em;
+        }
+
+        .section-title {
+            font-weight: 600;
+            letter-spacing: -0.015em;
+        }
+
+        .subtle-label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        /* 侧边导航 */
+        .menu-button {
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .menu-button:hover {
+            border-color: transparent;
+            background: var(--hover-bg);
+            transform: none;
+        }
+
+        .menu-button.active {
+            border-color: transparent;
+            background: var(--hover-bg);
+            box-shadow: none;
+        }
+
+        .menu-label {
+            font-weight: 500;
+        }
+
+        .menu-button.active .menu-label {
+            font-weight: 600;
+        }
+
+        .menu-index {
+            border-radius: 6px;
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .menu-button.active .menu-index {
+            border-color: var(--accent);
+        }
+
+        .menu-button:focus-visible,
+        .settings-nav__button:focus-visible,
+        .mobile-bottom-nav__button:focus-visible {
+            outline: none;
+            box-shadow: var(--focus-ring);
+        }
+
+        .settings-nav__button {
+            border-left: 0;
+            border-radius: 6px;
+        }
+
+        .settings-nav__button.active {
+            background: var(--hover-bg);
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .mobile-bottom-nav {
+            border-radius: 14px;
+            background: var(--panel);
+            box-shadow: var(--shadow-lg);
+            backdrop-filter: none;
+        }
+
+        .mobile-bottom-nav__button {
+            border-radius: 8px;
+        }
+
+        .mobile-bottom-nav__button.active {
+            background: var(--hover-bg);
+            box-shadow: none;
+        }
+
+        /* 按钮：solid=default，ghost=outline，success/warning=secondary，danger=destructive outline */
+        .ghost-button,
+        .solid-button,
+        .danger-button,
+        .success-button,
+        .warning-button {
+            gap: 0.5rem;
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            line-height: 1.25rem;
+            white-space: nowrap;
+            transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+        }
+
+        .ghost-button:hover,
+        .solid-button:hover,
+        .danger-button:hover,
+        .success-button:hover,
+        .warning-button:hover,
+        .ghost-button:active,
+        .solid-button:active,
+        .danger-button:active,
+        .success-button:active,
+        .warning-button:active {
+            transform: none;
+        }
+
+        .ghost-button:focus-visible,
+        .solid-button:focus-visible,
+        .danger-button:focus-visible,
+        .success-button:focus-visible,
+        .warning-button:focus-visible {
+            outline: none;
+            border-color: var(--ring);
+            box-shadow: var(--focus-ring);
+        }
+
+        .ghost-button:disabled,
+        .solid-button:disabled,
+        .danger-button:disabled,
+        .success-button:disabled,
+        .warning-button:disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .solid-button {
+            border: 1px solid transparent;
+            background: var(--accent);
+            color: var(--accent-contrast);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .solid-button:hover {
+            background: color-mix(in srgb, var(--accent) 90%, var(--panel));
+            box-shadow: var(--shadow-xs);
+        }
+
+        .ghost-button {
+            border: 1px solid var(--line);
+            background: var(--panel);
+            color: var(--text);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .ghost-button:hover {
+            background: var(--hover-bg);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .success-button,
+        .warning-button {
+            border: 1px solid transparent;
+            background: var(--panel-strong);
+            color: var(--text);
+            box-shadow: none;
+        }
+
+        .success-button:hover,
+        .warning-button:hover {
+            border-color: transparent;
+            background: color-mix(in srgb, var(--panel-strong) 80%, var(--text) 8%);
+            box-shadow: none;
+        }
+
+        .danger-button {
+            border: 1px solid var(--line);
+            background: var(--panel);
+            color: var(--danger);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .danger-button:hover {
+            border-color: var(--danger-border);
+            background: var(--danger-bg);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .dialog-actions .danger-button {
+            border-color: transparent;
+            background: var(--danger);
+            color: #ffffff;
+        }
+
+        .dialog-actions .danger-button:hover {
+            background: color-mix(in srgb, var(--danger) 90%, #000000);
+        }
+
+        .sync-button {
+            border-radius: 8px;
+        }
+
+        /* 输入框与下拉 */
+        .glass-input,
+        .glass-textarea,
+        .select-trigger,
+        .time-picker__trigger {
+            border: 1px solid var(--glass-input-border);
+            border-radius: 8px;
+            background: var(--input-bg);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .glass-input,
+        .glass-textarea {
+            padding: 0.5rem 0.75rem;
+        }
+
+        .select-trigger {
+            min-height: 36px;
+            padding: 0.4rem 0.75rem;
+        }
+
+        .glass-input:hover,
+        .glass-textarea:hover,
+        .select-trigger:hover {
+            border-color: var(--glass-input-border);
+        }
+
+        .glass-input:focus,
+        .glass-textarea:focus,
+        .select-shell.open .select-trigger,
+        .select-trigger:focus-visible {
+            border-color: var(--ring);
+            box-shadow: var(--focus-ring);
+        }
+
+        .glass-input::placeholder,
+        .glass-textarea::placeholder,
+        .select-value.is-placeholder {
+            color: var(--muted);
+        }
+
+        .select-value {
+            font-size: 0.875rem;
+            font-weight: 400;
+        }
+
+        .select-chevron {
+            background: transparent;
+        }
+
+        .select-menu {
+            border-radius: 8px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .select-option,
+        .account-modal .select-option {
+            border-radius: 4px;
+        }
+
+        .select-option.selected {
+            background: var(--hover-bg);
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        /* 开关 */
+        .switch-slider {
+            background: var(--glass-input-border);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .switch-slider::after {
+            background: #ffffff;
+            box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+        }
+
+        .switch-control input:checked + .switch-slider {
+            background: var(--switch-on-bg);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .switch-control input:checked + .switch-slider::after {
+            background: var(--accent-contrast);
+        }
+
+        .switch-control input:focus-visible + .switch-slider {
+            box-shadow: var(--focus-ring);
+        }
+
+        .switch-row:hover {
+            border-color: var(--line) !important;
+        }
+
+        /* 状态徽章与进度条 */
+        .status-pill {
+            gap: 0.375rem;
+            padding: 0.125rem 0.5rem;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .progress-track {
+            height: 6px;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--accent) 12%, transparent);
+        }
+
+        .progress-fill {
+            border-radius: 999px;
+        }
+
+        .online-update-card__progress > span {
+            background: var(--accent);
+            box-shadow: none;
+        }
+
+        /* 弹窗、浮层与提示 */
+        .dialog-overlay,
+        .account-modal-overlay {
+            background: rgb(0 0 0 / 0.5);
+        }
+
+        .online-update-overlay {
+            background: rgb(0 0 0 / 0.5);
+            backdrop-filter: none;
+        }
+
+        .dialog-card,
+        .account-modal,
+        .login-gate-card,
+        .setup-card {
+            border-radius: 12px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .setup-overlay {
+            background: var(--canvas);
+        }
+
+        .toast-card {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            box-shadow: var(--shadow-lg);
+            backdrop-filter: none;
+        }
+
+        .toast-status-dot,
+        .toast-card.success .toast-status-dot,
+        .toast-card.error .toast-status-dot {
+            box-shadow: none;
+        }
+
+        .toast-title,
+        .toast-card.success .toast-title,
+        .toast-card.error .toast-title {
+            color: var(--text);
+            font-size: 0.875rem;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+
+        .toast-message {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 0.875rem;
+        }
+
+        .settings-save-float {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+            box-shadow: var(--shadow-lg);
+            backdrop-filter: none;
+        }
+
+        .warning-banner {
+            border-color: var(--warning-border);
+            background: var(--warning-bg);
+            border-radius: 8px;
+        }
+
+        .update-center-card.has-update,
+        .about-hero,
+        .about-donation-card {
+            border-color: var(--line);
+            background: var(--panel);
+            box-shadow: var(--shadow-xs);
+        }
     </style>
 </head>
 
@@ -5247,8 +5722,8 @@
                                 列表模式
                             </div>
                             <div class="overflow-x-auto">
-                                <div class="min-w-[1120px]">
-                                    <div class="account-row summary-table-head" style="grid-template-columns: minmax(145px,1.12fr) 82px 70px minmax(112px,0.82fr) minmax(128px,0.95fr) 112px minmax(120px,0.82fr) minmax(210px,1fr);">
+                                <div class="min-w-[1040px]">
+                                    <div class="account-row summary-table-head" style="grid-template-columns: minmax(145px,1.12fr) 82px 70px minmax(112px,0.82fr) minmax(128px,0.95fr) 88px minmax(120px,0.82fr) minmax(200px,1fr);">
                                     <div>账号 / 实例</div>
                                     <div>区域</div>
                                     <div>状态</div>
@@ -5261,7 +5736,7 @@
 
                                 <div v-for="inst in filteredManagedInstances" :key="'manage-row-' + inst.id"
                                     class="account-row"
-                                    style="grid-template-columns: minmax(145px,1.12fr) 82px 70px minmax(112px,0.82fr) minmax(128px,0.95fr) 112px minmax(120px,0.82fr) minmax(210px,1fr);">
+                                    style="grid-template-columns: minmax(145px,1.12fr) 82px 70px minmax(112px,0.82fr) minmax(128px,0.95fr) 88px minmax(120px,0.82fr) minmax(200px,1fr);">
                                     <div class="summary-cell">
                                         <div class="summary-primary truncate" :title="inst.accountLabel || inst.remark || inst.instanceName">{{ inst.accountLabel || inst.remark || inst.instanceName }}</div>
                                         <div class="summary-secondary font-mono truncate" :title="inst.instanceId">{{ inst.instanceId }}</div>
