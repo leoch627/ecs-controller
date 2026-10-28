@@ -42,6 +42,7 @@ type Server struct {
 	mu            sync.Mutex
 	updateMu      sync.Mutex
 	backupMu      sync.Mutex
+	ipReplacing   sync.Map // account IDs with an IP replacement in flight
 	previews      map[string]map[string]any
 	imageChecker  func(context.Context, string) (bool, string, error)
 	githubAPIBase string
@@ -1381,20 +1382,68 @@ func (s *Server) replaceIP(w http.ResponseWriter, data map[string]any) {
 		s.cloudUnavailable(w)
 		return
 	}
-	if a.PublicIPMode != "eip" || !a.EIPManaged || a.EIPAllocationID == "" {
-		s.error(w, 400, "当前实例不是系统托管 EIP，无法更换公网 IP")
+	if a.InstanceStatus == "Releasing" {
+		s.error(w, 409, "实例正在释放，无法更换公网 IP")
 		return
 	}
-	oldAllocationID, oldIP := a.EIPAllocationID, a.PublicIP
-	alloc, ip, err := allocateEIP(rctx(), client, a.RegionID, a.InternetBandwidth)
+	if a.PublicIPMode != "eip" || a.EIPAllocationID == "" {
+		s.error(w, 400, "当前实例没有绑定 EIP，无法更换公网 IP")
+		return
+	}
+	if _, busy := s.ipReplacing.LoadOrStore(id, true); busy {
+		s.error(w, 409, "这台实例正在更换公网 IP，请稍候")
+		return
+	}
+	defer s.ipReplacing.Delete(id)
+
+	oldAllocationID, oldIP, bandwidth := a.EIPAllocationID, a.PublicIP, a.InternetBandwidth
+	detailClient, hasDetail := client.(cloud.EIPDetailClient)
+	var current cloud.EIPDetail
+	if hasDetail {
+		eip, err := detailClient.DescribeEIP(rctx(), a.RegionID, oldAllocationID)
+		if cloud.IsNotFound(err) {
+			s.error(w, 409, "当前 EIP 在云端已不存在，请先同步实例")
+			return
+		}
+		if err != nil {
+			s.error(w, 400, "读取当前 EIP 失败: "+err.Error())
+			return
+		}
+		if reason := eipReplaceBlocker(*eip, a.InstanceID); reason != "" {
+			s.error(w, 400, reason)
+			return
+		}
+		current = *eip
+		if current.Address != "" {
+			oldIP = current.Address
+		}
+		if current.Bandwidth < 1 {
+			current.Bandwidth = bandwidth
+		}
+		bandwidth = current.Bandwidth
+	}
+
+	var alloc, ip string
+	if hasDetail {
+		alloc, ip, err = detailClient.AllocateEIPLike(rctx(), a.RegionID, current)
+	} else {
+		alloc, ip, err = allocateEIP(rctx(), client, a.RegionID, bandwidth)
+	}
 	if err != nil {
-		s.error(w, 400, err.Error())
+		s.error(w, 400, "新 EIP 申请失败: "+err.Error())
 		return
 	}
 	if err = client.UnassociateEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
 		_ = client.ReleaseEIP(rctx(), a.RegionID, alloc)
 		s.error(w, 400, "旧 EIP 解绑失败: "+err.Error())
 		return
+	}
+	if hasDetail {
+		// Binding the new EIP or releasing the old one is rejected until the
+		// asynchronous unbind finishes. On timeout, let the bind report it.
+		if err := waitEIPAvailable(rctx(), detailClient, a.RegionID, oldAllocationID, eipUnbindTimeout); err != nil {
+			s.Store.AddLog("warning", "等待旧 EIP 解绑超时: "+err.Error())
+		}
 	}
 	if err = client.AssociateEIP(rctx(), a.RegionID, alloc, a.InstanceID); err != nil {
 		// Restore the old association when possible, then release the unused replacement.
@@ -1403,10 +1452,13 @@ func (s *Server) replaceIP(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 400, "新 EIP 绑定失败: "+err.Error())
 		return
 	}
+	warning := ""
 	if err = client.ReleaseEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
-		s.Store.AddLog("warning", "旧 EIP 释放失败: "+err.Error())
+		warning = fmt.Sprintf("旧 EIP %s 释放失败，请到阿里云控制台手动释放，避免产生闲置费用: %s", oldAllocationID, err.Error())
+		s.Store.AddLog("warning", warning)
 	}
-	if err := s.Store.UpdateNetwork(id, map[string]any{"eip_allocation_id": alloc, "eip_address": ip, "public_ip": ip, "public_ip_mode": "eip", "eip_managed": true}); err != nil {
+	// The controller created the new EIP, so instance release cleans it up.
+	if err := s.Store.UpdateNetwork(id, map[string]any{"eip_allocation_id": alloc, "eip_address": ip, "public_ip": ip, "public_ip_mode": "eip", "eip_managed": true, "internet_max_bandwidth_out": bandwidth}); err != nil {
 		s.error(w, 500, "新 EIP 已绑定，但本地状态保存失败: "+err.Error())
 		return
 	}
@@ -1415,8 +1467,55 @@ func (s *Server) replaceIP(w http.ResponseWriter, data map[string]any) {
 	if _, err := s.Store.EnqueueDNSCleanup(oldIP, a.InstanceID, accountDisplay(*a), "ip_replaced"); err != nil {
 		s.Store.AddLog("warning", "旧 IP 解析清理任务入队失败: "+err.Error())
 	}
-	s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】公网 IP 已更换\n实例: %s\n旧 IP: %s\n新 IP: %s\n区域: %s", accountDisplay(*a), oldIP, ip, a.RegionID), Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
-	s.json(w, 200, map[string]any{"success": true, "message": "公网 IP 已更换", "data": map[string]any{"publicIp": ip, "publicIpMode": "eip", "eipAllocationId": alloc, "eipAddress": ip, "internetMaxBandwidthOut": a.InternetBandwidth}})
+	text := fmt.Sprintf("【ECS 控制台】公网 IP 已更换\n实例: %s\n旧 IP: %s\n新 IP: %s\n区域: %s", accountDisplay(*a), oldIP, ip, a.RegionID)
+	if warning != "" {
+		text += "\n注意: " + warning
+	}
+	s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: text, Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
+	s.json(w, 200, map[string]any{"success": true, "message": "公网 IP 已更换", "warning": warning, "data": map[string]any{"publicIp": ip, "publicIpMode": "eip", "eipAllocationId": alloc, "eipAddress": ip, "eipManaged": true, "internetMaxBandwidthOut": bandwidth}})
+}
+
+// eipReplaceBlocker explains why an EIP cannot be swapped out, or returns "".
+// Each case would leave the old EIP unreleasable after the new one is bound.
+func eipReplaceBlocker(eip cloud.EIPDetail, instanceID string) string {
+	switch {
+	case eip.InstanceID != "" && eip.InstanceID != instanceID:
+		return "当前 EIP 已绑定到其他实例，请先同步实例"
+	case eip.ChargeType == "PrePaid":
+		return "包年包月 EIP 不能提前释放，无法更换公网 IP"
+	case eip.BandwidthPackageID != "":
+		return "当前 EIP 已加入共享带宽包，请先在阿里云控制台移出后再更换"
+	case eip.DeletionProtection:
+		return "当前 EIP 开启了删除保护，请先在阿里云控制台关闭后再更换"
+	}
+	return ""
+}
+
+var (
+	eipUnbindTimeout = 30 * time.Second
+	eipPollInterval  = 2 * time.Second
+)
+
+// waitEIPAvailable polls until an unassociated EIP reaches Available.
+func waitEIPAvailable(ctx context.Context, client cloud.EIPDetailClient, region, allocationID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		eip, err := client.DescribeEIP(ctx, region, allocationID)
+		if cloud.IsNotFound(err) || (err == nil && eip.Status == "Available") {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("EIP %s 仍处于 %s 状态", allocationID, eip.Status)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(eipPollInterval):
+		}
+	}
 }
 
 func allocateEIP(ctx context.Context, client cloud.Client, region string, bandwidth int) (string, string, error) {

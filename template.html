@@ -8581,7 +8581,7 @@
                 };
 
                 const canReplaceIp = (inst) => {
-                    return isAdmin.value && inst && !inst.operationLocked && inst.instanceStatus !== 'Releasing' && inst.publicIpMode === 'eip' && !!inst.eipManaged;
+                    return isAdmin.value && inst && !inst.operationLocked && inst.instanceStatus !== 'Releasing' && inst.publicIpMode === 'eip' && !!inst.eipAllocationId;
                 };
 
                 const controlInstance = async (accountId, action) => {
@@ -8616,7 +8616,7 @@
                 };
 
                 const replaceInstanceIp = async (accountId) => {
-                    const confirmed = await askConfirm('确定更换这台实例的公网 IP 吗？旧 EIP 会被释放且不可恢复，DDNS 会自动同步到新 IP。', {
+                    const confirmed = await askConfirm('确定更换这台实例的公网 IP 吗？系统会按旧 EIP 的带宽、计费方式和线路申请新 EIP 并绑定，旧 EIP 会被释放且不可恢复，DDNS 会自动同步到新 IP。', {
                         title: '更换公网 IP',
                         confirmLabel: '确认更换'
                     });
@@ -8643,7 +8643,11 @@
                             eipManaged: true,
                             internetMaxBandwidthOut: next.internetMaxBandwidthOut || 0
                         });
-                        openAlert(`公网 IP 已更换为 ${next.publicIp || '-'}`, 'success');
+                        if (data.warning) {
+                            openAlert(`公网 IP 已更换为 ${next.publicIp || '-'}，但${data.warning}`, 'error');
+                        } else {
+                            openAlert(`公网 IP 已更换为 ${next.publicIp || '-'}`, 'success');
+                        }
                         await reloadInstanceViews({ silent: true });
                     } catch (error) {
                         console.error('Replace instance IP failed', error);

@@ -164,6 +164,29 @@ type BandwidthEIPClient interface {
 	AllocateEIPWithBandwidth(context.Context, string, int) (string, string, error)
 }
 
+// EIPDetail is the live state of one EIP. IP replacement reads it to refuse
+// EIPs that cannot be released and to bill the replacement the same way.
+type EIPDetail struct {
+	AllocationID       string
+	Address            string
+	Status             string
+	InstanceID         string
+	Bandwidth          int
+	InternetChargeType string
+	ChargeType         string
+	ISP                string
+	BandwidthPackageID string
+	ResourceGroupID    string
+	DeletionProtection bool
+}
+
+// EIPDetailClient is optional for compatibility with lightweight cloud
+// clients. It lets IP replacement handle EIPs the controller did not create.
+type EIPDetailClient interface {
+	DescribeEIP(context.Context, string, string) (*EIPDetail, error)
+	AllocateEIPLike(context.Context, string, EIPDetail) (string, string, error)
+}
+
 type Service struct{ ECS, VPC, EIP, CMS, CDT, BSS *RPCClient }
 
 func NewRPCService(accessKey, secret, region string) *Service {
@@ -528,6 +551,48 @@ func (s *Service) UnassociateEIP(ctx context.Context, region, allocationID strin
 func (s *Service) ReleaseEIP(ctx context.Context, region, allocationID string) error {
 	_, err := s.EIP.Call(ctx, "ReleaseEipAddress", map[string]string{"RegionId": region, "AllocationId": allocationID})
 	return err
+}
+
+func (s *Service) DescribeEIP(ctx context.Context, region, allocationID string) (*EIPDetail, error) {
+	result, err := s.EIP.Call(ctx, "DescribeEipAddresses", map[string]string{"RegionId": region, "AllocationId": allocationID})
+	if err != nil {
+		return nil, err
+	}
+	items := mapsAt(result, "EipAddresses.EipAddress")
+	if len(items) == 0 {
+		return nil, &APIError{Code: "InvalidAllocationId.NotFound", Message: "EIP " + allocationID + " not found", HTTPStatus: 404}
+	}
+	item := items[0]
+	return &EIPDetail{
+		AllocationID:       stringValue(item["AllocationId"]),
+		Address:            firstString(item, "IpAddress", "EipAddress", "Address"),
+		Status:             stringValue(item["Status"]),
+		InstanceID:         stringValue(item["InstanceId"]),
+		Bandwidth:          intValue(item["Bandwidth"]),
+		InternetChargeType: stringValue(item["InternetChargeType"]),
+		ChargeType:         stringValue(item["ChargeType"]),
+		ISP:                stringValue(item["ISP"]),
+		BandwidthPackageID: stringValue(item["BandwidthPackageId"]),
+		ResourceGroupID:    stringValue(item["ResourceGroupId"]),
+		DeletionProtection: strings.EqualFold(stringValue(item["DeletionProtection"]), "true"),
+	}, nil
+}
+
+// AllocateEIPLike allocates a pay-as-you-go EIP with the bandwidth, billing
+// method, line and resource group of template.
+func (s *Service) AllocateEIPLike(ctx context.Context, region string, template EIPDetail) (string, string, error) {
+	params := map[string]string{"RegionId": region, "InstanceChargeType": "PostPaid", "InternetChargeType": "PayByTraffic", "Bandwidth": strconv.Itoa(max(template.Bandwidth, 1))}
+	if template.InternetChargeType != "" {
+		params["InternetChargeType"] = template.InternetChargeType
+	}
+	if template.ISP != "" {
+		params["ISP"] = template.ISP
+	}
+	if template.ResourceGroupID != "" {
+		params["ResourceGroupId"] = template.ResourceGroupID
+	}
+	result, err := s.EIP.Call(ctx, "AllocateEipAddress", params)
+	return stringValue(result["AllocationId"]), stringValue(result["EipAddress"]), err
 }
 
 func (s *Service) GetTraffic(ctx context.Context, targetRegion string) (float64, error) {

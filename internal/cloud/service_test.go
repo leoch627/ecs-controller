@@ -499,3 +499,53 @@ func TestDescribeInstancePublicNetworksMapsEIPBandwidth(t *testing.T) {
 		t.Fatalf("unexpected network: %#v", networks)
 	}
 }
+
+func TestDescribeEIPAndAllocateEIPLike(t *testing.T) {
+	var allocate url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		var response any
+		switch query.Get("Action") {
+		case "DescribeEipAddresses":
+			if query.Get("AllocationId") == "eip-missing" {
+				response = map[string]any{"EipAddresses": map[string]any{"EipAddress": []any{}}}
+				break
+			}
+			response = map[string]any{"EipAddresses": map[string]any{"EipAddress": []any{map[string]any{
+				"AllocationId": "eip-1", "IpAddress": "203.0.113.10", "Status": "InUse", "InstanceId": "i-1",
+				"Bandwidth": "50", "InternetChargeType": "PayByBandwidth", "ChargeType": "PostPaid", "ISP": "BGP_PRO",
+				"BandwidthPackageId": "", "ResourceGroupId": "rg-1", "DeletionProtection": false,
+			}}}}
+		case "AllocateEipAddress":
+			allocate = query
+			response = map[string]any{"AllocationId": "eip-2", "EipAddress": "198.51.100.20"}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := &RPCClient{HTTPClient: server.Client(), Endpoint: server.URL, Version: "2016-04-28", Product: "Vpc", AccessKey: "ak", Secret: "sk"}
+	service := &Service{EIP: client}
+	eip, err := service.DescribeEIP(context.Background(), "cn-test", "eip-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := EIPDetail{AllocationID: "eip-1", Address: "203.0.113.10", Status: "InUse", InstanceID: "i-1", Bandwidth: 50, InternetChargeType: "PayByBandwidth", ChargeType: "PostPaid", ISP: "BGP_PRO", ResourceGroupID: "rg-1"}
+	if *eip != want {
+		t.Fatalf("eip=%#v\nwant=%#v", *eip, want)
+	}
+	if _, err := service.DescribeEIP(context.Background(), "cn-test", "eip-missing"); !IsNotFound(err) {
+		t.Fatalf("missing EIP error=%v, want not found", err)
+	}
+
+	allocationID, ip, err := service.AllocateEIPLike(context.Background(), "cn-test", *eip)
+	if err != nil || allocationID != "eip-2" || ip != "198.51.100.20" {
+		t.Fatalf("allocate: %q %q %v", allocationID, ip, err)
+	}
+	for key, value := range map[string]string{"Bandwidth": "50", "InternetChargeType": "PayByBandwidth", "InstanceChargeType": "PostPaid", "ISP": "BGP_PRO", "ResourceGroupId": "rg-1"} {
+		if allocate.Get(key) != value {
+			t.Fatalf("AllocateEipAddress %s=%q, want %q (all: %v)", key, allocate.Get(key), value, allocate)
+		}
+	}
+}
