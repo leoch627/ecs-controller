@@ -25,6 +25,7 @@ type fakeCloudflare struct {
 	mu      sync.Mutex
 	records map[string]string // record id -> "name ip"
 	deleted []string
+	created int
 	fail    bool
 }
 
@@ -54,6 +55,13 @@ func (f *fakeCloudflare) client() *http.Client {
 				items = append(items, map[string]any{"id": id, "name": name, "content": ip, "ttl": 1})
 			}
 			return reply(200, items)
+		case r.Method == http.MethodPost && path == "/zones/zone-1/dns_records":
+			var record struct{ Name, Content string }
+			_ = json.NewDecoder(r.Body).Decode(&record)
+			f.created++
+			id := fmt.Sprintf("new-%d", f.created)
+			f.records[id] = record.Name + " " + record.Content
+			return reply(200, map[string]any{"id": id})
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/zones/zone-1/dns_records/"):
 			id := strings.TrimPrefix(path, "/zones/zone-1/dns_records/")
 			delete(f.records, id)

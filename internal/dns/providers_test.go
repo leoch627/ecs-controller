@@ -710,3 +710,62 @@ func TestLegacyCloudflareSettingKeys(t *testing.T) {
 		t.Fatal("unknown provider must fall back to Cloudflare")
 	}
 }
+
+// TestPoolScenario keeps one name pointed at a changing set of IPs on every
+// provider, whether it stores one IP per record or a record set.
+func TestPoolScenario(t *testing.T) {
+	ctx := context.Background()
+	for _, info := range Providers() {
+		info := info
+		t.Run(info.ID, func(t *testing.T) {
+			f := newFakeDNS()
+			svc := serviceFor(t, info.ID, "example.com", testCredentials[info.ID], f)
+			steps := []struct {
+				ips            []string
+				want           string
+				added, removed int
+			}{
+				{[]string{"3.3.3.3", "1.1.1.1", "2.2.2.2", "1.1.1.1", "10.0.0.1"}, "1.1.1.1,2.2.2.2,3.3.3.3", 3, 0},
+				{[]string{"1.1.1.1", "2.2.2.2", "3.3.3.3"}, "1.1.1.1,2.2.2.2,3.3.3.3", 0, 0},
+				{[]string{"2.2.2.2", "3.3.3.3", "4.4.4.4"}, "2.2.2.2,3.3.3.3,4.4.4.4", 1, 1},
+				{[]string{"5.5.5.5"}, "5.5.5.5", 1, 3},
+			}
+			for _, step := range steps {
+				added, removed, err := svc.SyncPool(ctx, "rr.example.com", step.ips)
+				if err != nil || added != step.added || removed != step.removed {
+					t.Fatalf("sync %v: added=%d removed=%d err=%v, want %d/%d", step.ips, added, removed, err, step.added, step.removed)
+				}
+				if got := strings.Join(f.values("rr.example.com"), ","); got != step.want {
+					t.Fatalf("sync %v: records %s, want %s", step.ips, got, step.want)
+				}
+			}
+			// A name that already has several IPs is taken over.
+			if _, _, err := svc.SyncPool(ctx, "pool.example.com", []string{"8.8.4.4", "6.6.6.6"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(f.values("pool.example.com"), ","); got != "6.6.6.6,8.8.4.4" {
+				t.Fatalf("pool.example.com records %s", got)
+			}
+			if got := strings.Join(f.values("hk.example.com"), ","); got != "47.242.10.21" {
+				t.Fatalf("other names must be left alone, hk.example.com=%s", got)
+			}
+			if _, _, err := svc.SyncPool(ctx, "rr.example.com", []string{"10.0.0.1"}); err == nil {
+				t.Fatal("a pool without public IPs must be refused, not emptied")
+			}
+		})
+	}
+}
+
+func TestPoolFQDN(t *testing.T) {
+	for _, tc := range []struct{ name, domain, want string }{
+		{"rr", "886615.xyz", "rr.886615.xyz"},
+		{"rr.886615.xyz", "886615.xyz", "rr.886615.xyz"},
+		{"886615.xyz", "886615.xyz", "886615.xyz"},
+		{"rr", "", ""},
+		{"", "886615.xyz", ""},
+	} {
+		if got := (Settings{PoolName: tc.name, Domain: tc.domain}).PoolFQDN(); got != tc.want {
+			t.Errorf("PoolFQDN(%q, %q)=%q, want %q", tc.name, tc.domain, got, tc.want)
+		}
+	}
+}

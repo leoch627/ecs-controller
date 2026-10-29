@@ -6211,6 +6211,13 @@
                                             <span class="switch-control"><input type="checkbox" v-model="config.Ddns.enabled"><span class="switch-slider"></span></span>
                                         </label>
                                         <p v-if="config.Ddns.enabled && !config.Ddns.domain" class="settings-warning">DDNS 需要填写根域名才会生效。</p>
+                                        <div class="settings-field">
+                                            <label for="dns-pool-name">轮询解析（可选）</label>
+                                            <input id="dns-pool-name" v-model.trim="config.Ddns.pool_name" class="glass-input" placeholder="例如 rr" autocomplete="off" spellcheck="false">
+                                            <p class="settings-hint">把所有运行中实例的 IP 写到同一个名称下，每个 IP 一条 A 记录，访问会大致平均地分到各个 IP。实例停机、开机或更换 IP 后一分钟左右更新，不受上面的 DDNS 开关影响。Cloudflare 请保持「仅 DNS」（灰云）。不要和实例的 DDNS 名称重名。留空即关闭，关闭不会删除已有记录。</p>
+                                            <p v-if="config.Ddns.pool_name && config.Ddns.domain" class="settings-hint">解析名：{{ dnsPoolFqdn }}</p>
+                                            <p v-if="config.Ddns.pool_name && !config.Ddns.domain" class="settings-warning">轮询解析需要填写根域名才会生效。</p>
+                                        </div>
                                     </div>
 
                                     <div class="settings-subsection">
@@ -7512,6 +7519,7 @@
                         cleanup_enabled: false,
                         provider: 'cloudflare',
                         domain: '',
+                        pool_name: '',
                         credentials: {}
                     },
                     Notification: {
@@ -8264,6 +8272,7 @@
                         cleanup_enabled: !!ddns.cleanup_enabled,
                         provider: ddns.provider || 'cloudflare',
                         domain: ddns.domain || '',
+                        pool_name: ddns.pool_name || '',
                         credentials: {}
                     };
                     for (const provider of payload?.DnsProviders || []) {
@@ -9686,6 +9695,12 @@
                 ].map((group) => ({ ...group, items: dnsProviders.value.filter((provider) => provider.market === group.key) }))
                     .filter((group) => group.items.length));
 
+                // Mirrors dns.Settings.PoolFQDN.
+                const dnsPoolFqdn = computed(() => {
+                    const name = (config.value.Ddns.pool_name || '').toLowerCase().replace(/^\.+|\.+$/g, '');
+                    const domain = config.value.Ddns.domain || '';
+                    return name === domain || name.endsWith('.' + domain) ? name : `${name}.${domain}`;
+                });
                 const currentDnsProvider = computed(() => dnsProviders.value.find((provider) => provider.id === config.value.Ddns.provider) || null);
                 const currentDnsCredentials = computed(() => config.value.Ddns.credentials[config.value.Ddns.provider] || {});
 
@@ -10317,6 +10332,7 @@
                     testingWebhook,
                     dnsProviderGroups,
                     currentDnsProvider,
+                    dnsPoolFqdn,
                     currentDnsCredentials,
                     dnsSavedSecrets,
                     dnsProviderBadge,

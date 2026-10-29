@@ -36,6 +36,7 @@ func (s *Server) dnsConfig() map[string]any {
 		"cleanup_enabled": settings.CleanupEnabled,
 		"provider":        settings.Provider,
 		"domain":          settings.Domain,
+		"pool_name":       settings.PoolName,
 		"credentials":     credentials,
 	}
 }
@@ -46,6 +47,7 @@ func (s *Server) saveDNSConfig(ddns map[string]any) error {
 	_ = s.Store.SetSetting("dns_cleanup_enabled", bool01(ddns["cleanup_enabled"]))
 	_ = s.Store.SetSetting("ddns_provider", dns.NormalizeID(stringValue(ddns["provider"])))
 	_ = s.Store.SetSetting("ddns_domain", dns.NormalizeDomain(stringValue(ddns["domain"])))
+	_ = s.Store.SetSetting("ddns_pool_name", dns.NormalizeDomain(stringValue(ddns["pool_name"])))
 	credentials, _ := ddns["credentials"].(map[string]any)
 	if credentials == nil {
 		credentials = map[string]any{}

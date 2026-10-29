@@ -213,6 +213,8 @@ type godaddy struct {
 	http *http.Client
 }
 
+func (*godaddy) recordSets() {}
+
 func (g *godaddy) ListZones(ctx context.Context) ([]Zone, error) {
 	var domains []struct {
 		Domain string `json:"domain"`

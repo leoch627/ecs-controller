@@ -38,6 +38,8 @@ type route53RecordSet struct {
 	} `xml:"ResourceRecords>ResourceRecord"`
 }
 
+func (*route53) recordSets() {}
+
 func (r *route53) ListZones(ctx context.Context) ([]Zone, error) {
 	zones := make([]Zone, 0)
 	marker := ""

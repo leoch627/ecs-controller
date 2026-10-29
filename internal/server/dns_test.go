@@ -62,14 +62,14 @@ func TestDNSConfigRoundTripMasksSecretsAndKeepsThemOnResave(t *testing.T) {
 		}
 	}
 	save(map[string]any{
-		"enabled": true, "cleanup_enabled": true, "provider": "huawei", "domain": "https://Example.COM/",
+		"enabled": true, "cleanup_enabled": true, "provider": "huawei", "domain": "https://Example.COM/", "pool_name": " RR. ",
 		"credentials": map[string]any{
 			"huawei":     map[string]any{"ak": "HWAK", "sk": "hw-secret", "region": "ap-southeast-1", "zone_id": ""},
 			"cloudflare": map[string]any{"token": "cf-secret", "proxied": true},
 		},
 	})
 	settings := st.Settings()
-	if settings["ddns_domain"] != "example.com" || settings["ddns_provider"] != "huawei" || settings["dns_cleanup_enabled"] != "1" {
+	if settings["ddns_domain"] != "example.com" || settings["ddns_provider"] != "huawei" || settings["dns_cleanup_enabled"] != "1" || settings["ddns_pool_name"] != "rr" {
 		t.Fatalf("settings were not normalized: %#v", settings)
 	}
 	if !strings.HasPrefix(settings["ddns_hw_sk"], "ENC1") || !strings.HasPrefix(settings["ddns_cf_token"], "ENC1") {
@@ -77,6 +77,9 @@ func TestDNSConfigRoundTripMasksSecretsAndKeepsThemOnResave(t *testing.T) {
 	}
 
 	config := srv.dnsConfig()
+	if config["pool_name"] != "rr" {
+		t.Fatalf("pool name read-back: %#v", config["pool_name"])
+	}
 	credentials := config["credentials"].(map[string]any)
 	huawei := credentials["huawei"].(map[string]any)
 	cloudflare := credentials["cloudflare"].(map[string]any)

@@ -25,6 +25,8 @@ type huawei struct {
 
 var huaweiRegionPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
+func (*huawei) recordSets() {}
+
 func (h *huawei) host() string {
 	region := strings.ToLower(h.cfg.get("region"))
 	if !huaweiRegionPattern.MatchString(region) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -14,6 +15,9 @@ type Settings struct {
 	Domain         string
 	DDNSEnabled    bool
 	CleanupEnabled bool
+	// PoolName is a name under Domain that resolves to every running
+	// instance, so clients are spread across them. Empty turns it off.
+	PoolName string
 	// Credentials holds every provider's form values so switching providers
 	// in the UI never loses the other one's keys.
 	Credentials map[string]Config
@@ -26,6 +30,7 @@ func LoadSettings(get func(key, fallback string) string, open func(string) (stri
 		Domain:         NormalizeDomain(get("ddns_domain", "")),
 		DDNSEnabled:    get("ddns_enabled", "0") == "1",
 		CleanupEnabled: get("dns_cleanup_enabled", "0") == "1",
+		PoolName:       NormalizeDomain(get("ddns_pool_name", "")),
 		Credentials:    map[string]Config{},
 	}
 	for _, info := range registry {
@@ -63,6 +68,24 @@ func (s Settings) Configured() bool {
 // DDNSActive: automatic A records need the switch, credentials and a root domain.
 func (s Settings) DDNSActive() bool {
 	return s.DDNSEnabled && s.Domain != "" && s.Configured()
+}
+
+// PoolFQDN is the full round-robin name, or "" when it is off. A name that
+// already ends with the root domain is used as is.
+func (s Settings) PoolFQDN() string {
+	if s.PoolName == "" || s.Domain == "" {
+		return ""
+	}
+	if s.PoolName == s.Domain || strings.HasSuffix(s.PoolName, "."+s.Domain) {
+		return s.PoolName
+	}
+	return s.PoolName + "." + s.Domain
+}
+
+// PoolActive: the round-robin name needs a pool name, a root domain and
+// credentials. It does not depend on the per-instance DDNS switch.
+func (s Settings) PoolActive() bool {
+	return s.PoolFQDN() != "" && s.Configured()
 }
 
 // CleanupActive: removing dead IPs needs the switch and credentials. Without a
@@ -143,6 +166,119 @@ func (s *Service) DeleteByName(ctx context.Context, name string) (bool, error) {
 		}
 	}
 	return len(records) > 0, nil
+}
+
+// recordSetProvider marks providers that keep every IP of a name in one
+// record set; the others store one IP per record.
+type recordSetProvider interface{ recordSets() }
+
+// SyncPool makes name resolve to exactly ips, so resolvers rotate between
+// them. It returns how many IPs it added and removed.
+func (s *Service) SyncPool(ctx context.Context, name string, ips []string) (int, int, error) {
+	name = normalizeName(name)
+	want := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		if isPublicIPv4(ip) && !containsValue(want, ip) {
+			want = append(want, ip)
+		}
+	}
+	if name == "" || len(want) == 0 {
+		return 0, 0, fmt.Errorf("轮询解析的记录名或 IP 为空")
+	}
+	slices.Sort(want)
+	zone, err := s.zoneFor(ctx, name)
+	if err != nil {
+		return 0, 0, err
+	}
+	records, err := s.provider.ListA(ctx, zone, name, "")
+	if err != nil {
+		return 0, 0, err
+	}
+	have := make([]string, 0)
+	for _, record := range records {
+		for _, value := range record.Values {
+			if !containsValue(have, value) {
+				have = append(have, value)
+			}
+		}
+	}
+	added, removed := 0, 0
+	for _, ip := range want {
+		if !containsValue(have, ip) {
+			added++
+		}
+	}
+	for _, ip := range have {
+		if !containsValue(want, ip) {
+			removed++
+		}
+	}
+	if _, ok := s.provider.(recordSetProvider); ok {
+		return added, removed, s.syncPoolSet(ctx, zone, name, records, want)
+	}
+
+	// One IP per record. Add the new IPs before removing old ones so the name
+	// never resolves to nothing in between.
+	kept, stale := make([]string, 0, len(records)), make([]Record, 0)
+	for _, record := range records {
+		if len(record.Values) != 1 || !containsValue(want, record.Values[0]) || containsValue(kept, record.Values[0]) {
+			stale = append(stale, record)
+			continue
+		}
+		ip := record.Values[0]
+		kept = append(kept, ip)
+		if !s.matches(record, ip) {
+			if err := s.provider.UpdateA(ctx, zone, record, []string{ip}); err != nil {
+				return 0, 0, err
+			}
+		}
+	}
+	for _, ip := range want {
+		if !containsValue(kept, ip) {
+			if err := s.provider.CreateA(ctx, zone, name, ip); err != nil {
+				return 0, 0, err
+			}
+		}
+	}
+	for _, record := range stale {
+		if err := s.provider.DeleteA(ctx, zone, record); err != nil {
+			return 0, 0, err
+		}
+	}
+	return added, removed, nil
+}
+
+// syncPoolSet writes want into the name's record set, creating it first if
+// needed, and drops any extra sets with the same name.
+func (s *Service) syncPoolSet(ctx context.Context, zone Zone, name string, records []Record, want []string) error {
+	if len(records) == 0 {
+		if err := s.provider.CreateA(ctx, zone, name, want[0]); err != nil {
+			return err
+		}
+		if len(want) == 1 {
+			return nil
+		}
+		var err error
+		if records, err = s.provider.ListA(ctx, zone, name, ""); err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return fmt.Errorf("轮询解析 %s 创建后没有读到记录", name)
+		}
+	}
+	current := slices.Clone(records[0].Values)
+	slices.Sort(current)
+	if !slices.Equal(current, want) {
+		if err := s.provider.UpdateA(ctx, zone, records[0], want); err != nil {
+			return err
+		}
+	}
+	for _, record := range records[1:] {
+		if err := s.provider.DeleteA(ctx, zone, record); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Change is one record touched by RemoveIP.

@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,6 +98,58 @@ func (w *Worker) syncAllDDNS(ctx context.Context) {
 	for _, account := range accounts {
 		w.syncDDNSAccount(ctx, account)
 	}
+}
+
+// syncDDNSPool points the round-robin name at every running instance. It
+// only calls the provider when that set changed, or every six hours to undo
+// manual edits, and backs off for ten minutes after a failure.
+func (w *Worker) syncDDNSPool(ctx context.Context, now time.Time) {
+	settings := w.dnsSettings()
+	if !settings.PoolActive() {
+		return
+	}
+	accounts, err := w.Store.LoadAccounts(false)
+	if err != nil {
+		return
+	}
+	ips := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		// A stopped instance keeps its EIP but cannot serve, so leave it out.
+		if account.InstanceStatus != "Running" || account.CloudPresence == "missing" || w.Store.InstanceExpiry(account.InstanceID).Expired(now) {
+			continue
+		}
+		if ip := store.AccountPublicIP(account); ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	if len(ips) == 0 {
+		// Keep the last records rather than leave the name resolving to nothing.
+		return
+	}
+	slices.Sort(ips)
+	ips = slices.Compact(ips)
+	name := settings.PoolFQDN()
+	state := name + "=" + strings.Join(ips, ",")
+	retryAt, _ := strconv.ParseInt(w.Store.GetSetting("ddns_pool_retry_at", "0"), 10, 64)
+	syncedAt, _ := strconv.ParseInt(w.Store.GetSetting("ddns_pool_synced_at", "0"), 10, 64)
+	if now.Unix() < retryAt || (w.Store.GetSetting("ddns_pool_state", "") == state && now.Unix()-syncedAt < 6*60*60) {
+		return
+	}
+	service, err := w.dnsService(settings)
+	if err == nil {
+		var added, removed int
+		if added, removed, err = service.SyncPool(ctx, name, ips); err == nil {
+			_ = w.Store.SetSetting("ddns_pool_state", state)
+			_ = w.Store.SetSetting("ddns_pool_synced_at", strconv.FormatInt(now.Unix(), 10))
+			_ = w.Store.SetSetting("ddns_pool_retry_at", "0")
+			if added+removed > 0 {
+				w.Store.AddLog("info", fmt.Sprintf("轮询解析已同步 %s：%d 个 IP（新增 %d，移除 %d）", name, len(ips), added, removed))
+			}
+			return
+		}
+	}
+	_ = w.Store.SetSetting("ddns_pool_retry_at", strconv.FormatInt(now.Add(10*time.Minute).Unix(), 10))
+	w.Store.AddLog("warning", "轮询解析同步失败: "+err.Error())
 }
 
 func (w *Worker) ddnsEnabled() bool {
