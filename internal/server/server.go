@@ -1386,7 +1386,9 @@ func (s *Server) replaceIP(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 409, "实例正在释放，无法更换公网 IP")
 		return
 	}
-	if a.PublicIPMode != "eip" || a.EIPAllocationID == "" {
+	// An empty allocation ID means an earlier attempt already released the old
+	// EIP; the swap then resumes by binding a new one.
+	if a.PublicIPMode != "eip" {
 		s.error(w, 400, "当前实例没有绑定 EIP，无法更换公网 IP")
 		return
 	}
@@ -1396,87 +1398,144 @@ func (s *Server) replaceIP(w http.ResponseWriter, data map[string]any) {
 	}
 	defer s.ipReplacing.Delete(id)
 
-	oldAllocationID, oldIP, bandwidth := a.EIPAllocationID, a.PublicIP, a.InternetBandwidth
+	oldAllocationID, oldIP := a.EIPAllocationID, a.PublicIP
+	template := cloud.EIPDetail{Bandwidth: a.InternetBandwidth}
+	bound := oldAllocationID != ""
 	detailClient, hasDetail := client.(cloud.EIPDetailClient)
-	var current cloud.EIPDetail
-	if hasDetail {
+	if hasDetail && oldAllocationID != "" {
 		eip, err := detailClient.DescribeEIP(rctx(), a.RegionID, oldAllocationID)
-		if cloud.IsNotFound(err) {
-			s.error(w, 409, "当前 EIP 在云端已不存在，请先同步实例")
-			return
-		}
-		if err != nil {
+		switch {
+		case cloud.IsNotFound(err):
+			oldAllocationID, bound = "", false
+		case err != nil:
 			s.error(w, 400, "读取当前 EIP 失败: "+err.Error())
 			return
+		default:
+			if reason := eipReplaceBlocker(*eip, a.InstanceID); reason != "" {
+				s.error(w, 400, reason)
+				return
+			}
+			if eip.Address != "" {
+				oldIP = eip.Address
+			}
+			if eip.Bandwidth < 1 {
+				eip.Bandwidth = template.Bandwidth
+			}
+			template, bound = *eip, eip.InstanceID != ""
 		}
-		if reason := eipReplaceBlocker(*eip, a.InstanceID); reason != "" {
-			s.error(w, 400, reason)
+	}
+	bandwidth := template.Bandwidth
+
+	// Release the old EIP before allocating the new one, as in the console:
+	// the swap never holds two EIPs, so it cannot hit the EIP quota or leave
+	// an extra one billing for idle time.
+	if oldAllocationID != "" {
+		s.settleIPTraffic(client, *a, oldIP)
+		if bound {
+			if err := client.UnassociateEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
+				s.error(w, 400, "旧 EIP 解绑失败: "+err.Error())
+				return
+			}
+		}
+		if hasDetail {
+			// Release is rejected until the asynchronous unbind finishes.
+			if err := waitEIPAvailable(rctx(), detailClient, a.RegionID, oldAllocationID, eipUnbindTimeout); err != nil {
+				s.Store.AddLog("warning", "等待旧 EIP 解绑超时: "+err.Error())
+			}
+		}
+		if err := client.ReleaseEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
+			message := "旧 EIP 释放失败: " + err.Error()
+			if bound && client.AssociateEIP(rctx(), a.RegionID, oldAllocationID, a.InstanceID) == nil {
+				message += "，已重新绑定旧 EIP"
+			} else {
+				message += "，旧 EIP 已解绑，请稍后再次更换"
+			}
+			s.Store.AddLog("error", message)
+			s.error(w, 400, message)
 			return
 		}
-		current = *eip
-		if current.Address != "" {
-			oldIP = current.Address
+		if err := s.Store.RetireInstanceTrafficIP(id, a.InstanceID, time.Now().Format("2006-01"), time.Now().UnixMilli()); err != nil {
+			s.Store.AddLog("warning", "保存旧 IP 本月流量失败，新 IP 的流量可能从零开始: "+err.Error())
 		}
-		if current.Bandwidth < 1 {
-			current.Bandwidth = bandwidth
+		// From here the instance has no public IP. Record that so a failure
+		// below leaves a state the next attempt resumes from.
+		if err := s.Store.UpdateNetwork(id, map[string]any{"eip_allocation_id": "", "eip_address": "", "public_ip": "", "eip_managed": false}); err != nil {
+			s.Store.AddLog("warning", "旧 EIP 已释放，但本地状态保存失败: "+err.Error())
 		}
-		bandwidth = current.Bandwidth
+		// The old EIP went back to Alibaba Cloud's pool and may be handed to
+		// someone else, so take it out of DNS.
+		if _, err := s.Store.EnqueueDNSCleanup(oldIP, a.InstanceID, accountDisplay(*a), "ip_replaced"); err != nil {
+			s.Store.AddLog("warning", "旧 IP 解析清理任务入队失败: "+err.Error())
+		}
+	}
+	failWithoutIP := func(message string) {
+		message += "。实例当前没有公网 IP，可再次点击更换 IP 重试"
+		s.Store.AddLog("error", message)
+		s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 更换失败", Summary: fmt.Sprintf("%s 当前没有公网 IP", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】公网 IP 更换失败\n实例: %s\n旧 IP: %s\n区域: %s\n原因: %s", accountDisplay(*a), oldIP, a.RegionID, message), Fields: map[string]string{"old_ip": oldIP, "instance_id": a.InstanceID}})
+		s.error(w, 400, message)
 	}
 
+	// The replacement is always pay-as-you-go and billed by traffic.
 	var alloc, ip string
 	if hasDetail {
-		alloc, ip, err = detailClient.AllocateEIPLike(rctx(), a.RegionID, current)
-	} else {
+		alloc, ip, err = detailClient.AllocateEIPLike(rctx(), a.RegionID, template)
+		if err != nil {
+			// The old line or resource group may be refused; fall back to defaults.
+			s.Store.AddLog("warning", "按旧 EIP 线路申请新 EIP 失败，改用默认线路: "+err.Error())
+		}
+	}
+	if !hasDetail || err != nil {
 		alloc, ip, err = allocateEIP(rctx(), client, a.RegionID, bandwidth)
 	}
 	if err != nil {
-		s.error(w, 400, "新 EIP 申请失败: "+err.Error())
+		failWithoutIP("新 EIP 申请失败: " + err.Error())
 		return
-	}
-	if err = client.UnassociateEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
-		_ = client.ReleaseEIP(rctx(), a.RegionID, alloc)
-		s.error(w, 400, "旧 EIP 解绑失败: "+err.Error())
-		return
-	}
-	if hasDetail {
-		// Binding the new EIP or releasing the old one is rejected until the
-		// asynchronous unbind finishes. On timeout, let the bind report it.
-		if err := waitEIPAvailable(rctx(), detailClient, a.RegionID, oldAllocationID, eipUnbindTimeout); err != nil {
-			s.Store.AddLog("warning", "等待旧 EIP 解绑超时: "+err.Error())
-		}
 	}
 	if err = client.AssociateEIP(rctx(), a.RegionID, alloc, a.InstanceID); err != nil {
-		// Restore the old association when possible, then release the unused replacement.
-		_ = client.AssociateEIP(rctx(), a.RegionID, oldAllocationID, a.InstanceID)
-		_ = client.ReleaseEIP(rctx(), a.RegionID, alloc)
-		s.error(w, 400, "新 EIP 绑定失败: "+err.Error())
+		message := "新 EIP 绑定失败: " + err.Error()
+		// An unbound EIP still bills for idle time; the next attempt allocates afresh.
+		if releaseErr := client.ReleaseEIP(rctx(), a.RegionID, alloc); releaseErr != nil {
+			message += fmt.Sprintf("；新 EIP %s 释放失败，请到阿里云控制台手动释放: %s", alloc, releaseErr.Error())
+		}
+		failWithoutIP(message)
 		return
-	}
-	warning := ""
-	if err = client.ReleaseEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
-		warning = fmt.Sprintf("旧 EIP %s 释放失败，请到阿里云控制台手动释放，避免产生闲置费用: %s", oldAllocationID, err.Error())
-		s.Store.AddLog("warning", warning)
 	}
 	// The controller created the new EIP, so instance release cleans it up.
 	if err := s.Store.UpdateNetwork(id, map[string]any{"eip_allocation_id": alloc, "eip_address": ip, "public_ip": ip, "public_ip_mode": "eip", "eip_managed": true, "internet_max_bandwidth_out": bandwidth}); err != nil {
 		s.error(w, 500, "新 EIP 已绑定，但本地状态保存失败: "+err.Error())
 		return
 	}
-	// The old EIP went back to Alibaba Cloud's pool and may be handed to
-	// someone else, so take it out of DNS.
-	if _, err := s.Store.EnqueueDNSCleanup(oldIP, a.InstanceID, accountDisplay(*a), "ip_replaced"); err != nil {
-		s.Store.AddLog("warning", "旧 IP 解析清理任务入队失败: "+err.Error())
-	}
+	s.Store.AddLog("info", fmt.Sprintf("%s 公网 IP 已更换: %s -> %s", accountDisplay(*a), oldIP, ip))
 	text := fmt.Sprintf("【ECS 控制台】公网 IP 已更换\n实例: %s\n旧 IP: %s\n新 IP: %s\n区域: %s", accountDisplay(*a), oldIP, ip, a.RegionID)
-	if warning != "" {
-		text += "\n注意: " + warning
-	}
 	s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: text, Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
-	s.json(w, 200, map[string]any{"success": true, "message": "公网 IP 已更换", "warning": warning, "data": map[string]any{"publicIp": ip, "publicIpMode": "eip", "eipAllocationId": alloc, "eipAddress": ip, "eipManaged": true, "internetMaxBandwidthOut": bandwidth}})
+	s.json(w, 200, map[string]any{"success": true, "message": "公网 IP 已更换", "data": map[string]any{"publicIp": ip, "publicIpMode": "eip", "eipAllocationId": alloc, "eipAddress": ip, "eipManaged": true, "internetMaxBandwidthOut": bandwidth}})
+}
+
+// settleIPTraffic records the month's traffic on ip just before it is taken
+// away, since CMS stops reporting it once the IP leaves the instance.
+func (s *Server) settleIPTraffic(client cloud.Client, a app.Account, ip string) {
+	monthlyClient, ok := client.(cloud.MonthlyTrafficClient)
+	if !ok || ip == "" {
+		return
+	}
+	now := time.Now()
+	month := now.Format("2006-01")
+	sample, err := s.Store.InstanceTrafficUsage(a.ID, a.InstanceID, month)
+	if err != nil {
+		return
+	}
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).UnixMilli()
+	bytes, points, err := monthlyClient.GetInstanceMonthlyTraffic(rctx(), a.RegionID, a.InstanceID, ip, sample.CurrentIPStartMS(monthStart), now.UnixMilli())
+	if err != nil || points == 0 {
+		return
+	}
+	if _, err := s.Store.SetInstanceTraffic(a.ID, a.InstanceID, month, bytes, now.UnixMilli()); err != nil {
+		s.Store.AddLog("warning", "更换 IP 前保存流量失败: "+err.Error())
+	}
 }
 
 // eipReplaceBlocker explains why an EIP cannot be swapped out, or returns "".
-// Each case would leave the old EIP unreleasable after the new one is bound.
+// Each case would make releasing the old EIP fail or take one that is not ours.
 func eipReplaceBlocker(eip cloud.EIPDetail, instanceID string) string {
 	switch {
 	case eip.InstanceID != "" && eip.InstanceID != instanceID:
@@ -1590,7 +1649,7 @@ func (s *Server) refreshAccount(w http.ResponseWriter, data map[string]any) {
 	trafficUpdated := false
 	if monthlyClient, ok := client.(cloud.MonthlyTrafficClient); ok {
 		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).UnixMilli()
-		if monthlyBytes, points, monthlyErr := monthlyClient.GetInstanceMonthlyTraffic(rctx(), a.RegionID, a.InstanceID, a.PublicIP, monthStart, endMS); monthlyErr == nil && points > 0 {
+		if monthlyBytes, points, monthlyErr := monthlyClient.GetInstanceMonthlyTraffic(rctx(), a.RegionID, a.InstanceID, a.PublicIP, sample.CurrentIPStartMS(monthStart), endMS); monthlyErr == nil && points > 0 {
 			if _, err := s.Store.SetInstanceTraffic(a.ID, a.InstanceID, month, monthlyBytes, endMS); err != nil {
 				s.error(w, 500, "流量账本保存失败")
 				return

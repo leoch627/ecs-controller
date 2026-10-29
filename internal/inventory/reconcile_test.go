@@ -146,3 +146,45 @@ func TestPurgedInstanceCanBeDiscoveredAsANewRecord(t *testing.T) {
 		t.Fatalf("rediscovered account state: accounts=%#v err=%v", accounts, err)
 	}
 }
+
+type fakeNetworkClient struct {
+	fakeClient
+	networks map[string]cloud.InstancePublicNetwork
+}
+
+func (f *fakeNetworkClient) DescribeInstancePublicNetworks(context.Context, string, []string) (map[string]cloud.InstancePublicNetwork, error) {
+	return f.networks, nil
+}
+
+func TestInstanceLeftWithoutEIPKeepsEIPMode(t *testing.T) {
+	st, group := newInventoryStore(t)
+	defer st.Close()
+	if err := st.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-test", GroupKey: group.GroupKey, InstanceID: "i-1", InstanceStatus: "Running", PublicIPMode: "eip", InternetBandwidth: 5000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-test", GroupKey: group.GroupKey, InstanceID: "i-2", InstanceStatus: "Running", PublicIPMode: "eip"}); err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeNetworkClient{
+		fakeClient: fakeClient{instances: []cloud.Instance{{ID: "i-1", Status: "Running"}, {ID: "i-2", Status: "Running", PublicIP: "203.0.113.20"}}},
+		networks:   map[string]cloud.InstancePublicNetwork{},
+	}
+	if _, err := SyncGroup(context.Background(), st, group, client, time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := st.LoadAccounts(false)
+	if err != nil || len(accounts) != 2 {
+		t.Fatalf("accounts=%#v err=%v", accounts, err)
+	}
+	modes := map[string]string{}
+	for _, account := range accounts {
+		modes[account.InstanceID] = account.PublicIPMode
+		if account.InstanceID == "i-1" && account.InternetBandwidth != 5000 {
+			t.Fatalf("bandwidth for the next EIP was lost: %+v", account)
+		}
+	}
+	// i-1 lost its EIP mid-swap; i-2 now has a fixed public IP instead.
+	if modes["i-1"] != "eip" || modes["i-2"] != "ecs_public_ip" {
+		t.Fatalf("modes=%v", modes)
+	}
+}

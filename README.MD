@@ -8,7 +8,7 @@
 
 - 查看实例状态、规格、公网 IP 和流量。
 - 同时查看每台实例的流量（CMS）和账号流量（CDT），支持流量超限告警或自动关机。
-- 创建、启动、停止和释放 ECS，以及一键更换实例绑定的弹性公网 IP（EIP），新 EIP 沿用旧 EIP 的带宽、计费方式和线路。
+- 创建、启动、停止和释放 ECS，以及一键更换实例绑定的弹性公网 IP（EIP）：先解绑并释放旧 EIP，再申请按流量计费、带宽和线路与旧 EIP 相同的新 EIP 并绑定。
 - 定时开关机、停机保活和每月自动开机。
 - Telegram、邮件、接口回调（Webhook）通知和每日流量摘要，支持 Telegram 远程控制。
 - 自动将公网 IP 同步到域名（DDNS），实例到期或释放后自动删除指向旧 IP 的解析；支持阿里云、腾讯云 DNSPod、华为云、Cloudflare、AWS Route 53、NameSilo、Porkbun、GoDaddy、DigitalOcean。

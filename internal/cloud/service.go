@@ -165,7 +165,7 @@ type BandwidthEIPClient interface {
 }
 
 // EIPDetail is the live state of one EIP. IP replacement reads it to refuse
-// EIPs that cannot be released and to bill the replacement the same way.
+// EIPs that cannot be released and to give the replacement the same line.
 type EIPDetail struct {
 	AllocationID       string
 	Address            string
@@ -541,7 +541,7 @@ func (s *Service) AllocateEIPWithBandwidth(ctx context.Context, region string, b
 	return stringValue(result["AllocationId"]), stringValue(result["EipAddress"]), err
 }
 func (s *Service) AssociateEIP(ctx context.Context, region, allocationID, instanceID string) error {
-	_, err := s.EIP.Call(ctx, "AssociateEipAddress", map[string]string{"RegionId": region, "AllocationId": allocationID, "InstanceId": instanceID, "InstanceType": "Ecs"})
+	_, err := s.EIP.Call(ctx, "AssociateEipAddress", map[string]string{"RegionId": region, "AllocationId": allocationID, "InstanceId": instanceID, "InstanceType": "EcsInstance"})
 	return err
 }
 func (s *Service) UnassociateEIP(ctx context.Context, region, allocationID string) error {
@@ -578,13 +578,10 @@ func (s *Service) DescribeEIP(ctx context.Context, region, allocationID string) 
 	}, nil
 }
 
-// AllocateEIPLike allocates a pay-as-you-go EIP with the bandwidth, billing
-// method, line and resource group of template.
+// AllocateEIPLike allocates a pay-as-you-go EIP billed by traffic, with the
+// bandwidth, line and resource group of template.
 func (s *Service) AllocateEIPLike(ctx context.Context, region string, template EIPDetail) (string, string, error) {
 	params := map[string]string{"RegionId": region, "InstanceChargeType": "PostPaid", "InternetChargeType": "PayByTraffic", "Bandwidth": strconv.Itoa(max(template.Bandwidth, 1))}
-	if template.InternetChargeType != "" {
-		params["InternetChargeType"] = template.InternetChargeType
-	}
 	if template.ISP != "" {
 		params["ISP"] = template.ISP
 	}

@@ -489,7 +489,7 @@ func (w *Worker) refreshTraffic(ctx context.Context, client cloud.Client, accoun
 	endMS := now.UnixMilli()
 	if monthlyClient, ok := client.(cloud.MonthlyTrafficClient); ok {
 		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).UnixMilli()
-		if monthlyBytes, points, monthlyErr := monthlyClient.GetInstanceMonthlyTraffic(ctx, account.RegionID, account.InstanceID, account.PublicIP, monthStart, endMS); monthlyErr == nil && points > 0 {
+		if monthlyBytes, points, monthlyErr := monthlyClient.GetInstanceMonthlyTraffic(ctx, account.RegionID, account.InstanceID, account.PublicIP, sample.CurrentIPStartMS(monthStart), endMS); monthlyErr == nil && points > 0 {
 			sample, err = w.Store.SetInstanceTraffic(account.ID, account.InstanceID, month, monthlyBytes, endMS)
 			if err != nil {
 				return 0, "error", err.Error(), err

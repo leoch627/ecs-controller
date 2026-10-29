@@ -543,9 +543,28 @@ func TestDescribeEIPAndAllocateEIPLike(t *testing.T) {
 	if err != nil || allocationID != "eip-2" || ip != "198.51.100.20" {
 		t.Fatalf("allocate: %q %q %v", allocationID, ip, err)
 	}
-	for key, value := range map[string]string{"Bandwidth": "50", "InternetChargeType": "PayByBandwidth", "InstanceChargeType": "PostPaid", "ISP": "BGP_PRO", "ResourceGroupId": "rg-1"} {
+	for key, value := range map[string]string{"Bandwidth": "50", "InternetChargeType": "PayByTraffic", "InstanceChargeType": "PostPaid", "ISP": "BGP_PRO", "ResourceGroupId": "rg-1"} {
 		if allocate.Get(key) != value {
 			t.Fatalf("AllocateEipAddress %s=%q, want %q (all: %v)", key, allocate.Get(key), value, allocate)
 		}
+	}
+}
+
+func TestAssociateEIPBindsToECSInstance(t *testing.T) {
+	var associate url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		associate = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"RequestId":"r"}`))
+	}))
+	defer server.Close()
+
+	client := &RPCClient{HTTPClient: server.Client(), Endpoint: server.URL, Version: "2016-04-28", Product: "Vpc", AccessKey: "ak", Secret: "sk"}
+	if err := (&Service{EIP: client}).AssociateEIP(context.Background(), "cn-test", "eip-1", "i-1"); err != nil {
+		t.Fatal(err)
+	}
+	// Alibaba Cloud rejects "Ecs" with InvalidParameter.InstanceTypeNotSupport.
+	if associate.Get("Action") != "AssociateEipAddress" || associate.Get("InstanceType") != "EcsInstance" || associate.Get("InstanceId") != "i-1" {
+		t.Fatalf("AssociateEipAddress params=%v", associate)
 	}
 }

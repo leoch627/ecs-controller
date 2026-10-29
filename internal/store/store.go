@@ -46,6 +46,23 @@ type Job struct {
 type TrafficSample struct {
 	TrafficBytes float64
 	LastSampleMS int64
+	// RetiredBytes is this month's traffic on public IPs the instance no
+	// longer has, and IPSinceMS when the current one was put in place.
+	RetiredBytes float64
+	IPSinceMS    int64
+}
+
+// CurrentIPStartMS is where the CMS total for the current public IP begins.
+// CMS reports traffic per IP, so a new IP starts from zero; earlier IPs are
+// kept in RetiredBytes and only the current one is summed from when it began.
+func (t TrafficSample) CurrentIPStartMS(monthStartMS int64) int64 {
+	if t.IPSinceMS <= monthStartMS {
+		return monthStartMS
+	}
+	// Hourly datapoints are stamped at the start of the hour; step just
+	// before it so the hour the IP started in is counted.
+	hour := int64(time.Hour / time.Millisecond)
+	return max(monthStartMS, t.IPSinceMS/hour*hour-1)
 }
 
 type TelegramActionToken struct {
@@ -235,6 +252,7 @@ func (s *Store) migrate() error {
 		{"accounts", "auto_start_blocked", "INTEGER DEFAULT 0"}, {"accounts", "schedule_last_start_date", "TEXT DEFAULT ''"}, {"accounts", "schedule_last_stop_date", "TEXT DEFAULT ''"},
 		{"accounts", "schedule_stop_active", "INTEGER DEFAULT 0"},
 		{"accounts", "schedule_blocked_by_traffic", "INTEGER DEFAULT 0"}, {"accounts", "remark", "TEXT DEFAULT ''"}, {"accounts", "site_type", "TEXT DEFAULT 'international'"}, {"accounts", "group_key", "TEXT DEFAULT ''"}, {"accounts", "instance_name", "TEXT DEFAULT ''"}, {"accounts", "instance_type", "TEXT DEFAULT ''"}, {"accounts", "internet_max_bandwidth_out", "INTEGER DEFAULT 0"}, {"accounts", "public_ip", "TEXT DEFAULT ''"}, {"accounts", "public_ip_mode", "TEXT DEFAULT 'ecs_public_ip'"}, {"accounts", "eip_allocation_id", "TEXT DEFAULT ''"}, {"accounts", "eip_address", "TEXT DEFAULT ''"}, {"accounts", "eip_managed", "INTEGER DEFAULT 0"}, {"accounts", "private_ip", "TEXT DEFAULT ''"}, {"accounts", "cpu", "INTEGER DEFAULT 0"}, {"accounts", "memory", "INTEGER DEFAULT 0"}, {"accounts", "os_name", "TEXT DEFAULT ''"}, {"accounts", "stopped_mode", "TEXT DEFAULT ''"}, {"accounts", "health_status", "TEXT DEFAULT 'Unknown'"}, {"accounts", "traffic_api_status", "TEXT DEFAULT 'ok'"}, {"accounts", "traffic_api_message", "TEXT DEFAULT ''"}, {"accounts", "protection_suspended", "INTEGER DEFAULT 0"}, {"accounts", "protection_suspend_reason", "TEXT DEFAULT ''"}, {"accounts", "protection_suspend_notified_at", "INTEGER DEFAULT 0"}, {"accounts", "last_seen_at", "INTEGER DEFAULT 0"}, {"accounts", "missing_count", "INTEGER DEFAULT 0"}, {"accounts", "missing_since", "INTEGER DEFAULT 0"}, {"accounts", "cloud_presence", "TEXT DEFAULT 'present'"}, {"accounts", "is_deleted", "INTEGER DEFAULT 0"},
+		{"instance_traffic_usage", "retired_bytes", "REAL DEFAULT 0"}, {"instance_traffic_usage", "ip_since_ms", "INTEGER DEFAULT 0"},
 	} {
 		if err := ensureColumn(s.DB, spec.table, spec.column, spec.definition); err != nil {
 			return err
@@ -1484,7 +1502,7 @@ func (s *Store) SetLastRun() {
 
 func (s *Store) InstanceTrafficUsage(accountID int64, instanceID, month string) (TrafficSample, error) {
 	var sample TrafficSample
-	err := s.DB.QueryRow(`SELECT traffic_bytes,last_sample_ms FROM instance_traffic_usage WHERE account_id=? AND instance_id=? AND billing_month=?`, accountID, instanceID, month).Scan(&sample.TrafficBytes, &sample.LastSampleMS)
+	err := s.DB.QueryRow(`SELECT traffic_bytes,last_sample_ms,COALESCE(retired_bytes,0),COALESCE(ip_since_ms,0) FROM instance_traffic_usage WHERE account_id=? AND instance_id=? AND billing_month=?`, accountID, instanceID, month).Scan(&sample.TrafficBytes, &sample.LastSampleMS, &sample.RetiredBytes, &sample.IPSinceMS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TrafficSample{}, nil
 	}
@@ -1500,16 +1518,24 @@ func (s *Store) AddInstanceTraffic(accountID int64, instanceID, month string, de
 	return s.InstanceTrafficUsage(accountID, instanceID, month)
 }
 
-// SetInstanceTraffic stores an absolute monthly CMS total. This lets the
+// SetInstanceTraffic stores an absolute CMS total for the current public IP
+// since CurrentIPStartMS, on top of the traffic of earlier IPs. This lets the
 // monitor recover after an instance was stopped or the process was offline
 // without losing the traffic accumulated between two polling windows.
 func (s *Store) SetInstanceTraffic(accountID int64, instanceID, month string, trafficBytes float64, lastSampleMS int64) (TrafficSample, error) {
 	now := time.Now().Unix()
-	_, err := s.DB.Exec(`INSERT INTO instance_traffic_usage(account_id,instance_id,billing_month,traffic_bytes,last_sample_ms,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(account_id,instance_id,billing_month) DO UPDATE SET traffic_bytes=excluded.traffic_bytes,last_sample_ms=MAX(instance_traffic_usage.last_sample_ms,excluded.last_sample_ms),updated_at=excluded.updated_at`, accountID, instanceID, month, trafficBytes, lastSampleMS, now)
+	_, err := s.DB.Exec(`INSERT INTO instance_traffic_usage(account_id,instance_id,billing_month,traffic_bytes,last_sample_ms,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(account_id,instance_id,billing_month) DO UPDATE SET traffic_bytes=COALESCE(instance_traffic_usage.retired_bytes,0)+excluded.traffic_bytes,last_sample_ms=MAX(instance_traffic_usage.last_sample_ms,excluded.last_sample_ms),updated_at=excluded.updated_at`, accountID, instanceID, month, trafficBytes, lastSampleMS, now)
 	if err != nil {
 		return TrafficSample{}, err
 	}
 	return s.InstanceTrafficUsage(accountID, instanceID, month)
+}
+
+// RetireInstanceTrafficIP keeps the month's traffic so far when the instance
+// is about to change public IP, so CMS totals for the new IP add to it.
+func (s *Store) RetireInstanceTrafficIP(accountID int64, instanceID, month string, sinceMS int64) error {
+	_, err := s.DB.Exec(`INSERT INTO instance_traffic_usage(account_id,instance_id,billing_month,traffic_bytes,last_sample_ms,retired_bytes,ip_since_ms,updated_at) VALUES(?,?,?,0,0,0,?,?) ON CONFLICT(account_id,instance_id,billing_month) DO UPDATE SET retired_bytes=instance_traffic_usage.traffic_bytes,ip_since_ms=excluded.ip_since_ms,updated_at=excluded.updated_at`, accountID, instanceID, month, sinceMS, time.Now().Unix())
+	return err
 }
 
 func (s *Store) AddTrafficHistory(accountID int64, traffic float64, at time.Time) error {

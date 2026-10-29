@@ -125,6 +125,13 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 				if a.InternetBandwidth < 1 {
 					a.InternetBandwidth = existing.InternetBandwidth
 				}
+			} else if existing.PublicIPMode == "eip" && instance.PublicIP == "" {
+				// An IP swap that failed after releasing the old EIP leaves the
+				// instance without one; keep the mode so the swap can be retried.
+				a.PublicIPMode = "eip"
+				if a.InternetBandwidth < 1 {
+					a.InternetBandwidth = existing.InternetBandwidth
+				}
 			}
 			if a.PublicIPMode == "eip" && a.EIPAddress != "" {
 				a.PublicIP = a.EIPAddress

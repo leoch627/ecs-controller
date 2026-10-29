@@ -534,3 +534,42 @@ func stringIndex(value, needle string) int {
 	}
 	return -1
 }
+
+func TestInstanceTrafficSurvivesPublicIPChange(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	const gib = 1024 * 1024 * 1024
+	if _, err := s.SetInstanceTraffic(1, "i-1", "2026-10", 300*gib, 1); err != nil {
+		t.Fatal(err)
+	}
+	swappedAt := time.Date(2026, 10, 29, 11, 40, 0, 0, time.UTC).UnixMilli()
+	if err := s.RetireInstanceTrafficIP(1, "i-1", "2026-10", swappedAt); err != nil {
+		t.Fatal(err)
+	}
+	// CMS totals for the new IP start from zero and add to the old IP's.
+	sample, err := s.SetInstanceTraffic(1, "i-1", "2026-10", 2*gib, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sample.TrafficBytes != 302*gib || sample.RetiredBytes != 300*gib {
+		t.Fatalf("sample=%+v", sample)
+	}
+	monthStart := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	hourStart := time.Date(2026, 10, 29, 11, 0, 0, 0, time.UTC).UnixMilli()
+	if got := sample.CurrentIPStartMS(monthStart); got != hourStart-1 {
+		t.Fatalf("current IP start=%d, want just before %d", got, hourStart)
+	}
+	if got := (TrafficSample{}).CurrentIPStartMS(monthStart); got != monthStart {
+		t.Fatalf("unchanged IP start=%d, want month start %d", got, monthStart)
+	}
+	// A second change keeps everything counted so far.
+	if err := s.RetireInstanceTrafficIP(1, "i-1", "2026-10", swappedAt+1); err != nil {
+		t.Fatal(err)
+	}
+	if sample, err = s.SetInstanceTraffic(1, "i-1", "2026-10", gib, 3); err != nil || sample.TrafficBytes != 303*gib {
+		t.Fatalf("sample=%+v err=%v", sample, err)
+	}
+}
