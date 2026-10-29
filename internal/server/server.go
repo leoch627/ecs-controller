@@ -402,14 +402,12 @@ func (s *Server) config(w http.ResponseWriter) {
 	groups, _ := s.Store.LoadGroups()
 	accounts, _ := s.Store.LoadAccounts(false)
 	type metric struct {
-		used         float64
-		fallbackUsed float64
-		hasFallback  bool
-		count        int
-		updated      int64
-		status       string
-		message      string
-		accountID    int64
+		used      float64
+		count     int
+		updated   int64
+		status    string
+		message   string
+		accountID int64
 	}
 	metrics := map[string]*metric{}
 	for _, account := range accounts {
@@ -422,16 +420,8 @@ func (s *Server) config(w http.ResponseWriter) {
 			m = &metric{status: "ok"}
 			metrics[key] = m
 		}
-		if account.TrafficAPIStatus == "fallback_cdt" {
-			// CDT is aggregated per AK/region, so repeated instance records must
-			// not be summed into the group total.
-			m.hasFallback = true
-			if account.TrafficUsed > m.fallbackUsed {
-				m.fallbackUsed = account.TrafficUsed
-			}
-		} else {
-			m.used += account.TrafficUsed
-		}
+		// Every instance shows its account's total, so take it once.
+		m.used = max(m.used, account.TrafficUsed)
 		m.count++
 		if account.UpdatedAt > m.updated {
 			m.updated = account.UpdatedAt
@@ -444,11 +434,6 @@ func (s *Server) config(w http.ResponseWriter) {
 			m.accountID = account.ID
 		}
 	}
-	for _, m := range metrics {
-		if m.hasFallback {
-			m.used = m.fallbackUsed
-		}
-	}
 	result := map[string]any{"admin_password": "********", "admin_password_set": s.Store.IsInitialized(), "password_login_enabled": settingBool(settings["password_login_enabled"], true), "passkey_count": s.Store.PasskeyCount(), "traffic_threshold": numberString(settings["traffic_threshold"], 95), "shutdown_mode": fallback(settings["shutdown_mode"], "KeepCharging"), "threshold_action": fallback(settings["threshold_action"], "stop_and_notify"), "keep_alive": settings["keep_alive"] == "1", "monthly_auto_start": settings["monthly_auto_start"] == "1", "api_interval": numberString(settings["api_interval"], 600), "enable_billing": settings["enable_billing"] == "1", "AppBrand": map[string]any{"name": fallback(settings["app_name"], "ECS 控制台"), "logo_url": settings["app_logo_url"]}, "Notification": notificationSettings(settings), "Ddns": s.dnsConfig(), "DnsProviders": dns.Providers(), "Accounts": []any{}}
 	items := result["Accounts"].([]any)
 	for _, g := range groups {
@@ -458,20 +443,15 @@ func (s *Server) config(w http.ResponseWriter) {
 		updated := int64(0)
 		trafficStatus := "ok"
 		trafficMessage := ""
-		scope := "instance"
 		var billing map[string]any
 		if m != nil {
 			used, count, updated, trafficStatus, trafficMessage = m.used, m.count, m.updated, m.status, m.message
-			scope = trafficScope(trafficStatus)
 			if m.accountID > 0 {
 				cycle := time.Now().Format("2006-01")
 				if cdtUsed, ok := s.getCachedCDTTraffic(g, m.accountID, cycle); ok {
-					// The account list intentionally shows CDT's account/region
-					// aggregate, while instance cards show CMS per-instance data.
 					used = cdtUsed
 					trafficStatus = "ok"
 					trafficMessage = ""
-					scope = "account"
 				}
 				billing = map[string]any{}
 				if cached, ok := s.Store.GetBillingCache(m.accountID, "balance", "", 6*time.Hour); ok {
@@ -509,7 +489,7 @@ func (s *Server) config(w http.ResponseWriter) {
 		if g.MaxTraffic > 0 {
 			usagePercent = used / g.MaxTraffic * 100
 		}
-		items = append(items, map[string]any{"AccessKeyId": g.AccessKeyID, "AccessKeySecret": "********", "AccessKeySecretSet": g.AccessKeySecret != "", "regionId": g.RegionID, "maxTraffic": g.MaxTraffic, "remark": g.Remark, "siteType": g.SiteType, "groupKey": g.GroupKey, "scheduleEnabled": g.ScheduleEnabled, "scheduleStartEnabled": g.ScheduleStartEnabled, "scheduleStopEnabled": g.ScheduleStopEnabled, "startTime": g.StartTime, "stopTime": g.StopTime, "scheduleBlockedByTraffic": g.ScheduleBlockedByTraffic, "usageUsed": used, "usageRemaining": maxFloat(g.MaxTraffic-used, 0), "usagePercent": usagePercent, "instanceCount": count, "usageLastUpdated": time.Unix(updated, 0).Format("2006-01-02 15:04:05"), "trafficStatus": trafficStatus, "trafficMessage": trafficMessage, "trafficScope": scope, "billing": billing})
+		items = append(items, map[string]any{"AccessKeyId": g.AccessKeyID, "AccessKeySecret": "********", "AccessKeySecretSet": g.AccessKeySecret != "", "regionId": g.RegionID, "maxTraffic": g.MaxTraffic, "remark": g.Remark, "siteType": g.SiteType, "groupKey": g.GroupKey, "scheduleEnabled": g.ScheduleEnabled, "scheduleStartEnabled": g.ScheduleStartEnabled, "scheduleStopEnabled": g.ScheduleStopEnabled, "startTime": g.StartTime, "stopTime": g.StopTime, "scheduleBlockedByTraffic": g.ScheduleBlockedByTraffic, "usageUsed": used, "usageRemaining": maxFloat(g.MaxTraffic-used, 0), "usagePercent": usagePercent, "instanceCount": count, "usageLastUpdated": time.Unix(updated, 0).Format("2006-01-02 15:04:05"), "trafficStatus": trafficStatus, "trafficMessage": trafficMessage, "billing": billing})
 	}
 	result["Accounts"] = items
 	s.json(w, 200, result)
@@ -768,16 +748,9 @@ func (s *Server) status(w http.ResponseWriter) {
 		if label == "" {
 			label = a.AccessKeyID
 		}
-		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95)), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "trafficScope": trafficScope(a.TrafficAPIStatus), "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
+		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95)), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
 	}
 	s.json(w, 200, map[string]any{"data": data, "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
-}
-
-func trafficScope(status string) string {
-	if status == "fallback_cdt" {
-		return "account"
-	}
-	return "instance"
 }
 
 func (s *Server) saveConfig(data map[string]any) error {
@@ -1654,8 +1627,6 @@ func (s *Server) refreshAccount(w http.ResponseWriter, data map[string]any) {
 				s.error(w, 500, "流量账本保存失败")
 				return
 			}
-			updated, _ := s.Store.InstanceTrafficUsage(a.ID, a.InstanceID, month)
-			a.TrafficUsed = updated.TrafficBytes / (1024 * 1024 * 1024)
 			a.TrafficAPIStatus = "ok"
 			a.TrafficAPIMessage = ""
 			a.ProtectionSuspended = false
@@ -1676,13 +1647,10 @@ func (s *Server) refreshAccount(w http.ResponseWriter, data map[string]any) {
 					return
 				}
 			}
-			updated, _ := s.Store.InstanceTrafficUsage(a.ID, a.InstanceID, month)
-			a.TrafficUsed = updated.TrafficBytes / (1024 * 1024 * 1024)
 			a.TrafficAPIStatus = "ok"
 			a.TrafficAPIMessage = ""
 			a.ProtectionSuspended = false
 			a.ProtectionSuspendReason = ""
-			trafficUpdated = true
 		} else {
 			a.TrafficAPIStatus = "error"
 			a.TrafficAPIMessage = cmsTrafficErrorMessage(metricErr)
@@ -1690,8 +1658,10 @@ func (s *Server) refreshAccount(w http.ResponseWriter, data map[string]any) {
 			a.ProtectionSuspendReason = "traffic_api_error"
 		}
 	}
-	if trafficUpdated {
-		_ = s.Store.AddTrafficHistory(a.ID, a.TrafficUsed, now)
+	// The card shows the account total; CMS above only feeds the shutdown check.
+	if traffic, err := client.GetTraffic(rctx(), a.RegionID); err == nil {
+		a.TrafficUsed = traffic
+		_ = s.Store.AddTrafficHistory(a.ID, traffic, now)
 	}
 	var billingErr error
 	if s.Store.GetSetting("enable_billing", "0") == "1" {

@@ -159,9 +159,12 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 					account.TrafficAPIStatus, account.TrafficAPIMessage = "error", trafficMessage
 					account.ProtectionSuspended, account.ProtectionSuspendReason = true, reason
 					account.UpdatedAt, account.TrafficBillingMonth = now.Unix(), now.Format("2006-01")
+					if traffic, ok := w.accountTraffic(ctx, client, account); ok {
+						account.TrafficUsed = traffic
+					}
 					// CMS may be delayed or temporarily unavailable. A failed CMS
 					// request must not skip the independent CDT safety check.
-					if available := w.applyTrafficProtection(ctx, client, &account, now, threshold, thresholdAction, shutdownMode, account.TrafficUsed, false, keepAlive, monthlyAutoStart); available {
+					if available := w.applyTrafficProtection(ctx, client, &account, now, threshold, thresholdAction, shutdownMode, 0, false, keepAlive, monthlyAutoStart); available {
 						account.ProtectionSuspended, account.ProtectionSuspendReason = false, ""
 					}
 					if reason == "credential_invalid" && account.ProtectionNotifiedAt == 0 {
@@ -173,13 +176,16 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 					}
 					continue
 				}
-				account.TrafficUsed = traffic
+				// A failed CDT read keeps the last account total on the card.
+				if accountTraffic, ok := w.accountTraffic(ctx, client, account); ok {
+					account.TrafficUsed = accountTraffic
+				}
 				account.TrafficBillingMonth = now.Format("2006-01")
 				account.TrafficAPIStatus, account.TrafficAPIMessage, account.ProtectionSuspended, account.ProtectionSuspendReason = trafficStatus, trafficMessage, false, ""
 				if account.ProtectionNotifiedAt != 0 {
 					account.ProtectionNotifiedAt = 0
 				}
-				_ = w.Store.AddTrafficHistory(account.ID, traffic, now)
+				_ = w.Store.AddTrafficHistory(account.ID, account.TrafficUsed, now)
 				if enableBilling && account.InstanceID != "" {
 					cycle := now.Format("2006-01")
 					if billingClient, ok := client.(cloud.BillingClient); ok {
@@ -305,35 +311,36 @@ func (w *Worker) protectionTraffic(ctx context.Context, client cloud.Client, acc
 	return traffic, source
 }
 
-// protectionTrafficStatus combines the independent CMS and CDT signals. CMS
-// remains the value shown on an instance card, while the larger available
-// value is used for the safety threshold. If both APIs are unavailable,
-// automation must pause instead of trusting an old value.
-func (w *Worker) protectionTrafficStatus(ctx context.Context, client cloud.Client, account app.Account, cmsTraffic float64, cmsAvailable bool) (float64, string, bool) {
+// accountTraffic is the account's CDT total for the month, cached for five
+// minutes. Instance cards show it because, unlike CMS, it does not restart
+// when the instance changes public IP.
+func (w *Worker) accountTraffic(ctx context.Context, client cloud.Client, account app.Account) (float64, bool) {
 	cycle := time.Now().Format("2006-01")
 	if account.ID > 0 {
 		if cached, ok := w.Store.GetBillingCache(account.ID, "cdt_protection", cycle, 5*time.Minute); ok {
-			cdtTraffic := trafficFloat(cached["traffic"])
-			if !cmsAvailable {
-				return cdtTraffic, "CDT", true
-			}
-			if cdtTraffic >= cmsTraffic {
-				return cdtTraffic, "CDT", true
-			}
-			return cmsTraffic, "CMS", true
+			return trafficFloat(cached["traffic"]), true
 		}
 	}
-	cdtTraffic, err := client.GetTraffic(ctx, account.RegionID)
-	if err == nil {
-		if account.ID > 0 {
-			_ = w.Store.SetBillingCache(account.ID, "cdt_protection", cycle, map[string]any{"traffic": cdtTraffic})
-		}
-		if !cmsAvailable || cdtTraffic >= cmsTraffic {
-			return cdtTraffic, "CDT", true
-		}
-		return cmsTraffic, "CMS", true
+	traffic, err := client.GetTraffic(ctx, account.RegionID)
+	if err != nil {
+		return 0, false
 	}
-	if cmsAvailable {
+	if account.ID > 0 {
+		_ = w.Store.SetBillingCache(account.ID, "cdt_protection", cycle, map[string]any{"traffic": traffic})
+	}
+	return traffic, true
+}
+
+// protectionTrafficStatus picks the larger of the account's CDT total and the
+// instance's CMS total. CDT can lag behind, and CMS reports within minutes, so
+// CMS still guards against a burst between CDT updates. If both APIs are
+// unavailable, automation must pause instead of trusting an old value.
+func (w *Worker) protectionTrafficStatus(ctx context.Context, client cloud.Client, account app.Account, cmsTraffic float64, cmsAvailable bool) (float64, string, bool) {
+	cdtTraffic, cdtAvailable := w.accountTraffic(ctx, client, account)
+	switch {
+	case cdtAvailable && (!cmsAvailable || cdtTraffic >= cmsTraffic):
+		return cdtTraffic, "CDT", true
+	case cmsAvailable:
 		return cmsTraffic, "CMS", true
 	}
 	return 0, "", false
@@ -361,7 +368,12 @@ func trafficFloat(value any) float64 {
 }
 
 func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, account *app.Account, now time.Time, threshold float64, thresholdAction, shutdownMode string, keepAlive, monthlyAutoStart bool) {
-	protectionTraffic, protectionSource, available := w.protectionTrafficStatus(ctx, client, *account, account.TrafficUsed, account.TrafficAPIStatus != "error" && !account.ProtectionSuspended)
+	// Between refreshes, CMS comes from the ledger; the card shows CDT.
+	cmsTraffic := 0.0
+	if sample, err := w.Store.InstanceTrafficUsage(account.ID, account.InstanceID, now.Format("2006-01")); err == nil {
+		cmsTraffic = sample.TrafficBytes / (1024 * 1024 * 1024)
+	}
+	protectionTraffic, protectionSource, available := w.protectionTrafficStatus(ctx, client, *account, cmsTraffic, account.TrafficAPIStatus != "error" && !account.ProtectionSuspended)
 	if !available {
 		account.ProtectionSuspended = true
 		if account.ProtectionSuspendReason == "" {

@@ -31,20 +31,6 @@ type fakeCloud struct {
 	started, stopped                         int
 }
 
-type fakeDailyCloud struct {
-	fakeCloud
-	dailyBytes   float64
-	dailyPoints  int
-	dailyStartMS int64
-	dailyEndMS   int64
-}
-
-func (f *fakeDailyCloud) GetInstanceDailyTraffic(_ context.Context, _ string, _ string, _ string, startMS, endMS int64) (float64, int, error) {
-	f.dailyStartMS = startMS
-	f.dailyEndMS = endMS
-	return f.dailyBytes, f.dailyPoints, nil
-}
-
 func (f *fakeCloud) DescribeRegions(context.Context) ([]map[string]any, error) { return nil, nil }
 func (f *fakeCloud) DescribeZones(context.Context, string) ([]map[string]any, error) {
 	return []map[string]any{{"ZoneId": "zone-1"}}, nil
@@ -156,7 +142,7 @@ func (f *fakeCloud) GetBilling(context.Context, string, string, string) (float64
 	return 0, 0, "CNY", nil
 }
 
-func TestDailyTrafficEventSeparatesCMSYesterdayAndCDTCurrentUsage(t *testing.T) {
+func TestDailyTrafficEventReportsAccountTotals(t *testing.T) {
 	s, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -166,63 +152,13 @@ func TestDailyTrafficEventSeparatesCMSYesterdayAndCDTCurrentUsage(t *testing.T) 
 	if err := s.SaveGroups([]app.AccountGroup{{GroupKey: "g", AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-hongkong", Remark: "香港账号", MaxTraffic: 190}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-hongkong", GroupKey: "g", InstanceID: "i-1", InstanceName: "ECS-01", InstanceStatus: "Running", TrafficAPIStatus: "ok"}); err != nil {
-		t.Fatal(err)
-	}
-	accounts, err := s.LoadAccounts(false)
-	if err != nil || len(accounts) != 1 {
-		t.Fatalf("load account: %#v %v", accounts, err)
-	}
-	day := time.Date(2026, 7, 31, 12, 0, 0, 0, time.Local)
-	if err := s.AddTrafficHistory(accounts[0].ID, 10, day.Add(-13*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddTrafficHistory(accounts[0].ID, 14.33, day); err != nil {
-		t.Fatal(err)
-	}
-
 	w := &Worker{Store: s, CloudFactory: func(app.AccountGroup) cloud.Client { return &fakeCloud{cdtTraffic: 8.2} }}
-	event, err := w.dailyTrafficEvent(context.Background(), day)
+	event, err := w.dailyTrafficEvent(context.Background(), time.Date(2026, 7, 31, 12, 0, 0, 0, time.Local))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(event.Text, "CMS 实例昨日消耗流量：\n- ECS-01：4.33 GB") || !strings.Contains(event.Text, "CDT 账号流量已使用：\n- 香港账号：8.20 GB/190 GB") || !strings.Contains(event.Text, "数据状态：完整") {
+	if !strings.Contains(event.Text, "账号流量已使用：\n- 香港账号：8.20 GB/190 GB") || !strings.Contains(event.Text, "数据状态：完整") || strings.Contains(event.Text, "CMS") {
 		t.Fatalf("unexpected daily traffic event:\n%s", event.Text)
-	}
-}
-
-func TestDailyTrafficEventUsesExactCMSDayWindow(t *testing.T) {
-	s, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-
-	if err := s.SaveGroups([]app.AccountGroup{{GroupKey: "g", AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-hongkong", Remark: "香港账号", MaxTraffic: 190}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-hongkong", GroupKey: "g", InstanceID: "i-1", InstanceName: "ECS-01", InstanceStatus: "Running", TrafficAPIStatus: "ok"}); err != nil {
-		t.Fatal(err)
-	}
-
-	reportDay := time.Date(2026, 7, 31, 12, 0, 0, 0, time.Local)
-	dayStart := time.Date(2026, 7, 31, 0, 0, 0, 0, time.Local)
-	daily := &fakeDailyCloud{dailyBytes: 7.72 * 1024 * 1024 * 1024, dailyPoints: 24}
-	w := &Worker{
-		Store: s,
-		CloudFactory: func(app.AccountGroup) cloud.Client {
-			return daily
-		},
-	}
-	event, err := w.dailyTrafficEvent(context.Background(), reportDay)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(event.Text, "CMS 实例昨日消耗流量：\n- ECS-01：7.72 GB") {
-		t.Fatalf("daily CMS traffic did not use the direct result:\n%s", event.Text)
-	}
-	if daily.dailyStartMS != dayStart.UnixMilli() || daily.dailyEndMS != dayStart.AddDate(0, 0, 1).UnixMilli() {
-		t.Fatalf("daily CMS traffic used the wrong range: %d - %d", daily.dailyStartMS, daily.dailyEndMS)
 	}
 }
 
@@ -257,17 +193,6 @@ func TestCreateTaskCompensatesAfterEIPFailure(t *testing.T) {
 	task, _ := s.GetTask("task-1")
 	if task.Status != "failed" {
 		t.Fatalf("task status: %#v", task)
-	}
-}
-
-func TestGroupTrafficUsedDoesNotDoubleCountCDTAggregate(t *testing.T) {
-	accounts := []app.Account{
-		{GroupKey: "group-1", TrafficUsed: 12.5, TrafficAPIStatus: "fallback_cdt"},
-		{GroupKey: "group-1", TrafficUsed: 12.5, TrafficAPIStatus: "fallback_cdt"},
-	}
-	used := groupTrafficUsed(accounts)
-	if used["group-1"] != 12.5 {
-		t.Fatalf("CDT aggregate was double-counted: %#v", used)
 	}
 }
 
@@ -665,7 +590,7 @@ func TestTelegramStringValuePreservesLargeIDs(t *testing.T) {
 	}
 }
 
-func TestTelegramTrafficShowsCDTAndInstanceTrafficSeparately(t *testing.T) {
+func TestTelegramTrafficShowsAccountTraffic(t *testing.T) {
 	s, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -679,10 +604,13 @@ func TestTelegramTrafficShowsCDTAndInstanceTrafficSeparately(t *testing.T) {
 	}
 	w := &Worker{Store: s, Cloud: &fakeCloud{cdtTraffic: 6.99}}
 	body := w.telegramTraffic(context.Background())
-	for _, expected := range []string{"CDT 流量：6.99 GB / 190.00 GB", "实例流量：2.00 GB / 190.00 GB", "使用率：4%（取两者较高值）"} {
+	for _, expected := range []string{"账号流量：6.99 GB / 190.00 GB", "使用率：4%"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("Telegram overview missing %q: %s", expected, body)
 		}
+	}
+	if strings.Contains(body, "实例流量") {
+		t.Fatalf("Telegram overview still shows CMS traffic: %s", body)
 	}
 }
 
@@ -711,5 +639,32 @@ func TestTelegramMenuUsesCompactDrillDownLayout(t *testing.T) {
 	instances := w.instancesKeyboard(1)["inline_keyboard"].([][]map[string]string)
 	if len(instances) < 2 || !strings.HasPrefix(instances[0][0]["text"], "🟢 ") || instances[0][0]["callback_data"] != "m:inst:1:1" {
 		t.Fatalf("instance menu does not expose status and page: %#v", instances)
+	}
+}
+
+func TestCachedProtectionReadsCMSFromLedgerNotTheCard(t *testing.T) {
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-hongkong", GroupKey: "g", InstanceID: "i-1", InstanceStatus: "Running", MaxTraffic: 200, TrafficUsed: 10, TrafficAPIStatus: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := s.LoadAccounts(false)
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("load account: %#v %v", accounts, err)
+	}
+	account := accounts[0]
+	now := time.Now()
+	// The card shows the lagging account total; CMS has already seen 195 GB.
+	if _, err := s.SetInstanceTraffic(account.ID, "i-1", now.Format("2006-01"), 195*1024*1024*1024, now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeCloud{cdtTraffic: 10}
+	w := &Worker{Store: s}
+	w.runCachedAutomation(context.Background(), fake, &account, now, 95, "stop_and_notify", "StopCharging", false, false)
+	if fake.stopped != 1 {
+		t.Fatalf("CMS over the threshold did not stop the instance (stopped=%d)", fake.stopped)
 	}
 }

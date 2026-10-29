@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/Kori1c/ecs-controller/internal/app"
-	"github.com/Kori1c/ecs-controller/internal/cloud"
 	"github.com/Kori1c/ecs-controller/internal/notify"
 )
 
@@ -61,75 +60,11 @@ func hasConfiguredNotificationChannel(cfg notify.EventConfig) bool {
 }
 
 func (w *Worker) dailyTrafficEvent(ctx context.Context, reportDay time.Time) (notify.Event, error) {
-	accounts, err := w.Store.LoadAccounts(false)
-	if err != nil {
-		return notify.Event{}, err
-	}
 	groups, err := w.Store.LoadGroups()
 	if err != nil {
 		return notify.Event{}, err
 	}
-
 	complete := true
-	cmsLines := make([]string, 0)
-	dayStart := time.Date(reportDay.Year(), reportDay.Month(), reportDay.Day(), 0, 0, 0, 0, reportDay.Location())
-	dayEnd := dayStart.AddDate(0, 0, 1)
-	for _, account := range accounts {
-		if account.InstanceID == "" || account.CloudPresence == "missing" || account.TrafficAPIStatus == "fallback_cdt" {
-			continue
-		}
-		if account.TrafficAPIStatus == "error" {
-			complete = false
-			cmsLines = append(cmsLines, fmt.Sprintf("- %s：数据不可用", accountLabel(account)))
-			continue
-		}
-		client := w.Cloud
-		if w.CloudFactory != nil {
-			client = w.CloudFactory(app.AccountGroup{
-				AccessKeyID:     account.AccessKeyID,
-				AccessKeySecret: account.AccessKeySecret,
-				RegionID:        account.RegionID,
-				SiteType:        account.SiteType,
-			})
-		}
-		if dailyClient, ok := client.(cloud.DailyTrafficClient); ok {
-			bytes, points, err := dailyClient.GetInstanceDailyTraffic(
-				ctx,
-				account.RegionID,
-				account.InstanceID,
-				account.PublicIP,
-				dayStart.UnixMilli(),
-				dayEnd.UnixMilli(),
-			)
-			if err != nil {
-				complete = false
-				cmsLines = append(cmsLines, fmt.Sprintf("- %s：数据不可用", accountLabel(account)))
-				continue
-			}
-			if points == 0 {
-				complete = false
-				cmsLines = append(cmsLines, fmt.Sprintf("- %s：数据不足", accountLabel(account)))
-				continue
-			}
-			cmsLines = append(cmsLines, fmt.Sprintf("- %s：%.2f GB", accountLabel(account), bytes/(1024*1024*1024)))
-			continue
-		}
-
-		traffic, ok, deltaErr := w.Store.DailyTrafficDelta(account.ID, reportDay)
-		if deltaErr != nil {
-			return notify.Event{}, deltaErr
-		}
-		if !ok {
-			complete = false
-			cmsLines = append(cmsLines, fmt.Sprintf("- %s：数据不足", accountLabel(account)))
-			continue
-		}
-		cmsLines = append(cmsLines, fmt.Sprintf("- %s：%.2f GB", accountLabel(account), traffic))
-	}
-	if len(cmsLines) == 0 {
-		cmsLines = append(cmsLines, "- 暂无有效 CMS 实例采样")
-	}
-
 	cdtLines := make([]string, 0, len(groups))
 	for _, group := range groups {
 		client := w.Cloud
@@ -155,7 +90,7 @@ func (w *Worker) dailyTrafficEvent(ctx context.Context, reportDay time.Time) (no
 		}
 	}
 	if len(cdtLines) == 0 {
-		cdtLines = append(cdtLines, "- 暂无有效 CDT 账号数据")
+		cdtLines = append(cdtLines, "- 暂无有效账号数据")
 	}
 
 	status := "完整"
@@ -163,19 +98,16 @@ func (w *Worker) dailyTrafficEvent(ctx context.Context, reportDay time.Time) (no
 		status = "不完整"
 	}
 	text := strings.Join([]string{
-		fmt.Sprintf("昨日流量摘要（%s）", reportDay.Format("2006-01-02")),
+		fmt.Sprintf("每日流量摘要（%s）", reportDay.Format("2006-01-02")),
 		"",
-		"CMS 实例昨日消耗流量：",
-		strings.Join(cmsLines, "\n"),
-		"",
-		"CDT 账号流量已使用：",
+		"账号流量已使用：",
 		strings.Join(cdtLines, "\n"),
 		"",
 		"数据状态：" + status,
 	}, "\n")
 	return notify.Event{
 		Title:   "每日流量摘要",
-		Summary: fmt.Sprintf("昨日流量摘要（%s）", reportDay.Format("2006-01-02")),
+		Summary: fmt.Sprintf("每日流量摘要（%s）", reportDay.Format("2006-01-02")),
 		Text:    text,
 		Fields: map[string]string{
 			"report_date": reportDay.Format("2006-01-02"),

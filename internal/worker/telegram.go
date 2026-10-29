@@ -294,7 +294,6 @@ func (w *Worker) telegramHome() string {
 func (w *Worker) telegramTraffic(ctx context.Context) string {
 	groups, _ := w.Store.LoadGroups()
 	accounts, _ := w.Store.LoadAccounts(false)
-	instanceUsed, instanceAvailable := w.telegramInstanceTraffic(accounts, time.Now())
 	cdtUsed := w.telegramCDTTraffic(ctx, groups, accounts, time.Now())
 	if len(groups) == 0 {
 		return "📊 账号概览\n\n暂无账号数据。"
@@ -306,15 +305,15 @@ func (w *Worker) telegramTraffic(ctx context.Context) string {
 		if key == "" {
 			key = group.AccessKeyID + "|" + group.RegionID
 		}
-		instanceTraffic := instanceUsed[key]
-		cdtTraffic, hasCDT := cdtUsed[key]
-		percentTraffic := instanceTraffic
-		if hasCDT && cdtTraffic > percentTraffic {
-			percentTraffic = cdtTraffic
+		lines = append(lines, "", "👤 "+firstNonEmpty(group.Remark, "未命名账号"), "📍 "+group.RegionID)
+		traffic, ok := cdtUsed[key]
+		if !ok {
+			lines = append(lines, "📡 账号流量：暂不可用")
+			continue
 		}
 		percent := 0.0
 		if group.MaxTraffic > 0 {
-			percent = percentTraffic / group.MaxTraffic * 100
+			percent = traffic / group.MaxTraffic * 100
 		}
 		status := "正常"
 		if percent >= 100 {
@@ -322,15 +321,7 @@ func (w *Worker) telegramTraffic(ctx context.Context) string {
 		} else if percent >= threshold {
 			status = "接近阈值"
 		}
-		cdtLine := "📡 CDT 流量：暂不可用"
-		if hasCDT {
-			cdtLine = fmt.Sprintf("📡 CDT 流量：%.2f GB / %.2f GB", cdtTraffic, group.MaxTraffic)
-		}
-		instanceLine := "🖥️ 实例流量：暂不可用"
-		if instanceAvailable[key] {
-			instanceLine = fmt.Sprintf("🖥️ 实例流量：%.2f GB / %.2f GB", instanceTraffic, group.MaxTraffic)
-		}
-		lines = append(lines, "", "👤 "+firstNonEmpty(group.Remark, "未命名账号"), "📍 "+group.RegionID, cdtLine, instanceLine, fmt.Sprintf("📈 使用率：%.0f%%（取两者较高值）", percent), statusIconForTraffic(status)+" "+status)
+		lines = append(lines, fmt.Sprintf("📡 账号流量：%.2f GB / %.2f GB", traffic, group.MaxTraffic), fmt.Sprintf("📈 使用率：%.0f%%", percent), statusIconForTraffic(status)+" "+status)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -368,34 +359,6 @@ func (w *Worker) telegramCDTTraffic(ctx context.Context, groups []app.AccountGro
 	return result
 }
 
-func (w *Worker) telegramInstanceTraffic(accounts []app.Account, now time.Time) (map[string]float64, map[string]bool) {
-	used := map[string]float64{}
-	available := map[string]bool{}
-	month := now.Format("2006-01")
-	for _, account := range accounts {
-		if account.CloudPresence == "missing" {
-			continue
-		}
-		key := account.GroupKey
-		if key == "" {
-			key = account.AccessKeyID + "|" + account.RegionID
-		}
-		traffic := account.TrafficUsed
-		isAvailable := account.TrafficAPIStatus != "fallback_cdt"
-		if account.TrafficAPIStatus == "fallback_cdt" && account.InstanceID != "" {
-			if sample, err := w.Store.InstanceTrafficUsage(account.ID, account.InstanceID, month); err == nil && sample.LastSampleMS > 0 {
-				traffic = sample.TrafficBytes / (1024 * 1024 * 1024)
-				isAvailable = true
-			} else {
-				traffic = 0
-			}
-		}
-		used[key] += traffic
-		available[key] = available[key] || isAvailable
-	}
-	return used, available
-}
-
 func (w *Worker) telegramInstances(page int) string {
 	accounts, _ := w.Store.LoadAccounts(false)
 	if len(accounts) == 0 {
@@ -423,7 +386,7 @@ func (w *Worker) telegramInstance(id int64) string {
 	if err != nil {
 		return "🖥️ 实例不存在或已被清理。"
 	}
-	return fmt.Sprintf("🖥️ 实例详情\n\n%s\n%s %s  ·  %s\n\n🌐 公网 IP：%s\n⚙️ 规格：%s\n📦 实例流量：%s\n🆔 实例 ID：%s\n🕒 最后同步：%s", instanceDisplayName(*a), statusIcon(a.InstanceStatus), statusLabel(a.InstanceStatus), firstNonEmpty(a.RegionID, "未知区域"), firstNonEmpty(a.PublicIP, "暂无"), firstNonEmpty(a.InstanceType, "未知"), formatTraffic(a.TrafficUsed, a.MaxTraffic), firstNonEmpty(a.InstanceID, "未知"), telegramUpdatedAt(a.UpdatedAt))
+	return fmt.Sprintf("🖥️ 实例详情\n\n%s\n%s %s  ·  %s\n\n🌐 公网 IP：%s\n⚙️ 规格：%s\n📦 %s\n🆔 实例 ID：%s\n🕒 最后同步：%s", instanceDisplayName(*a), statusIcon(a.InstanceStatus), statusLabel(a.InstanceStatus), firstNonEmpty(a.RegionID, "未知区域"), firstNonEmpty(a.PublicIP, "暂无"), firstNonEmpty(a.InstanceType, "未知"), formatTraffic(a.TrafficUsed, a.MaxTraffic), firstNonEmpty(a.InstanceID, "未知"), telegramUpdatedAt(a.UpdatedAt))
 }
 
 func (w *Worker) telegramReleaseConfirm(id int64, ttl time.Duration) string {
@@ -458,15 +421,17 @@ func (w *Worker) refreshTelegramAccount(ctx context.Context, id int64) error {
 	}
 	now := time.Now()
 	a.LastSeenAt, a.MissingCount, a.MissingSince, a.CloudPresence = now.Unix(), 0, 0, "present"
-	traffic, trafficStatus, trafficMessage, trafficErr := w.refreshTraffic(ctx, client, *a, now)
-	if trafficErr == nil {
+	if traffic, ok := w.accountTraffic(ctx, client, *a); ok {
 		a.TrafficUsed = traffic
+		_ = w.Store.AddTrafficHistory(a.ID, traffic, now)
+	}
+	_, trafficStatus, trafficMessage, trafficErr := w.refreshTraffic(ctx, client, *a, now)
+	if trafficErr == nil {
 		a.TrafficAPIStatus = trafficStatus
 		a.TrafficAPIMessage = trafficMessage
 		a.ProtectionSuspended = false
 		a.ProtectionSuspendReason = ""
 		a.ProtectionNotifiedAt = 0
-		_ = w.Store.AddTrafficHistory(a.ID, traffic, now)
 	} else {
 		a.TrafficAPIStatus = "error"
 		a.TrafficAPIMessage = cmsTrafficErrorMessage(trafficErr)
@@ -500,45 +465,6 @@ func (w *Worker) refreshAllTelegramData(ctx context.Context) error {
 		return fmt.Errorf("%s", strings.Join(failures, "; "))
 	}
 	return nil
-}
-
-func groupTrafficUsed(accounts []app.Account) map[string]float64 {
-	type metric struct {
-		used         float64
-		fallbackUsed float64
-		hasFallback  bool
-	}
-	metrics := map[string]*metric{}
-	for _, account := range accounts {
-		if account.CloudPresence == "missing" {
-			continue
-		}
-		key := account.GroupKey
-		if key == "" {
-			key = account.AccessKeyID + "|" + account.RegionID
-		}
-		m := metrics[key]
-		if m == nil {
-			m = &metric{}
-			metrics[key] = m
-		}
-		if account.TrafficAPIStatus == "fallback_cdt" {
-			m.hasFallback = true
-			if account.TrafficUsed > m.fallbackUsed {
-				m.fallbackUsed = account.TrafficUsed
-			}
-		} else {
-			m.used += account.TrafficUsed
-		}
-	}
-	used := make(map[string]float64, len(metrics))
-	for key, metric := range metrics {
-		used[key] = metric.used
-		if metric.hasFallback {
-			used[key] = metric.fallbackUsed
-		}
-	}
-	return used
 }
 
 func (w *Worker) controlTelegramAccount(ctx context.Context, id int64, action string) error {
@@ -749,9 +675,9 @@ func instanceDisplayName(account app.Account) string {
 }
 func formatTraffic(used, max float64) string {
 	if max > 0 {
-		return fmt.Sprintf("实例流量 %.2f / %.2f GB", used, max)
+		return fmt.Sprintf("账号流量 %.2f / %.2f GB", used, max)
 	}
-	return fmt.Sprintf("实例流量 %.2f GB", used)
+	return fmt.Sprintf("账号流量 %.2f GB", used)
 }
 func telegramUpdatedAt(timestamp int64) string {
 	if timestamp <= 0 {

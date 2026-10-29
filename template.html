@@ -5636,7 +5636,7 @@
 
                                 <div class="instance-status-card__traffic">
                                     <div class="instance-status-card__traffic-head">
-                                        <span class="instance-status-card__traffic-label">{{ item.trafficScope === 'account' ? '账号聚合流量' : 'CMS 实例流量' }}</span>
+                                        <span class="instance-status-card__traffic-label">账号流量</span>
                                     </div>
                                     <p class="instance-status-card__traffic-value">
                                         {{ formatTrafficValue(item.flow_used) }} <span class="instance-status-card__traffic-total">/ {{ item.flow_total }} GB</span>
@@ -5730,7 +5730,7 @@
                                     <div>规格</div>
                                     <div>地址</div>
                                     <div class="center-column">公网带宽峰值</div>
-                                    <div class="center-column">CMS 实例流量</div>
+                                    <div class="center-column">账号流量</div>
                                     <div class="center-column">操作</div>
                                 </div>
 
@@ -5762,7 +5762,7 @@
                                             <div class="account-usage__meta single">
                                                 <span v-if="hasTrafficIssue(inst)">
                                                     {{ formatTrafficValue(inst.flow_used) }}
-                                                    <span class="text-[#dc2626]">{{ inst.trafficScope === 'account' ? '账号聚合' : trafficIssueText(inst) }}</span>
+                                                    <span class="text-[#dc2626]">{{ trafficIssueText(inst) }}</span>
                                                 </span>
                                                 <span v-else>{{ formatTrafficValue(inst.flow_used) }} / {{ inst.flow_total }} GB</span>
                                             </div>
@@ -5849,7 +5849,7 @@
                                     <div>备注</div>
                                     <div>区域</div>
                                     <div>站点</div>
-                                    <div class="center-column">账号 CDT 流量</div>
+                                    <div class="center-column">账号流量</div>
                                     <div class="center-column">消费情况</div>
                                     <div class="center-column">操作</div>
                                 </div>
@@ -5939,7 +5939,7 @@
                                         <strong class="account-card-grid__value">{{ getSiteTypeLabel(acc.siteType) }}</strong>
                                     </div>
                                     <div class="account-card-grid__metric">
-                                        <span class="account-card-grid__label">账号 CDT 流量</span>
+                                        <span class="account-card-grid__label">账号流量</span>
                                         <strong v-if="hasTrafficIssue(acc)" class="account-card-grid__value text-[#dc2626]">{{ trafficIssueText(acc) }}</strong>
                                         <strong v-else class="account-card-grid__value">{{ formatTrafficValue(acc.usageUsed) }} / {{ acc.maxTraffic }} GB</strong>
                                     </div>
@@ -6253,7 +6253,7 @@
                                     <label class="switch-row flex items-center justify-between rounded-[12px] border px-3 py-2 text-sm">
                                         <span>
                                             <span class="daily-summary-card__title">每日流量摘要</span>
-                                            <span class="daily-summary-card__hint">CMS 推送昨日实例增量，CDT 推送当前周期累计用量。</span>
+                                            <span class="daily-summary-card__hint">每天推送一次各账号本月已用流量。</span>
                                         </span>
                                         <span class="switch-control shrink-0">
                                             <input type="checkbox" v-model="config.Notification.daily_enabled">

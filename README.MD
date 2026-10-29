@@ -7,7 +7,7 @@
 ## 主要功能
 
 - 查看实例状态、规格、公网 IP 和流量。
-- 同时查看每台实例的流量（CMS）和账号流量（CDT），支持流量超限告警或自动关机。
+- 查看每个账号本月已用流量（CDT，更换公网 IP 不会清零），支持流量超限告警或自动关机。
 - 创建、启动、停止和释放 ECS，以及一键更换实例绑定的弹性公网 IP（EIP）：先解绑并释放旧 EIP，再申请按流量计费、带宽和线路与旧 EIP 相同的新 EIP 并绑定。
 - 定时开关机、停机保活和每月自动开机。
 - Telegram、邮件、接口回调（Webhook）通知和每日流量摘要，支持 Telegram 远程控制。
@@ -91,7 +91,7 @@ token 只用于首次初始化，不是管理员登录密码，也不能用于�
 | 权限名称 | 用途 |
 | --- | --- |
 | [AliyunECSFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunecsfullaccess) | 查看和管理 ECS，支持开关机、流量超限自动关机和定时开关机 |
-| [AliyunCloudMonitorReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuncloudmonitorreadonlyaccess) | 读取实例流量（CMS），以及 EIP 的地址和带宽 |
+| [AliyunCloudMonitorReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuncloudmonitorreadonlyaccess) | 读取实例实时流量（CMS，只用于关机判断），以及 EIP 的地址和带宽 |
 | [AliyunCDTReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuncdtreadonlyaccess) | 读取账号流量（CDT） |
 
 注意：这是方便配置的方案，不是权限最少的方案。`AliyunECSFullAccess` 也允许创建和删除 ECS；只授予 ECS 只读权限则无法自动关机。

@@ -146,12 +146,6 @@ type MonthlyTrafficClient interface {
 	GetInstanceMonthlyTraffic(context.Context, string, string, string, int64, int64) (bytes float64, points int, err error)
 }
 
-// DailyTrafficClient queries one exact calendar day's instance traffic from
-// CloudMonitor instead of deriving a day from month-to-date samples.
-type DailyTrafficClient interface {
-	GetInstanceDailyTraffic(context.Context, string, string, string, int64, int64) (bytes float64, points int, err error)
-}
-
 // NetworkClient allows the caller to authorize the correct remote login port
 // without changing the legacy Client interface.
 type NetworkClient interface {
@@ -915,14 +909,6 @@ func (s *Service) GetOutboundTrafficDelta(ctx context.Context, region, instanceI
 }
 
 func (s *Service) GetInstanceMonthlyTraffic(ctx context.Context, region, instanceID, publicIP string, startMS, endMS int64) (float64, int, error) {
-	return s.getInstanceTrafficWindow(ctx, region, instanceID, publicIP, startMS, endMS, "1440")
-}
-
-func (s *Service) GetInstanceDailyTraffic(ctx context.Context, region, instanceID, publicIP string, startMS, endMS int64) (float64, int, error) {
-	return s.getInstanceTrafficWindow(ctx, region, instanceID, publicIP, startMS, endMS, "48")
-}
-
-func (s *Service) getInstanceTrafficWindow(ctx context.Context, region, instanceID, publicIP string, startMS, endMS int64, length string) (float64, int, error) {
 	if endMS <= startMS {
 		return 0, 0, nil
 	}
@@ -944,7 +930,7 @@ func (s *Service) getInstanceTrafficWindow(ctx context.Context, region, instance
 			"StartTime":  strconv.FormatInt(startMS, 10),
 			"EndTime":    strconv.FormatInt(endMS, 10),
 			"Dimensions": candidate.dimensions,
-			"Length":     length,
+			"Length":     "1440",
 		})
 		if err != nil {
 			lastErr = err

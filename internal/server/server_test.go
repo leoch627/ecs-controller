@@ -593,7 +593,7 @@ func TestTaskResponsePreservesFrontendCredentialFields(t *testing.T) {
 	}
 }
 
-func TestConfigDoesNotDoubleCountCDTAggregateAcrossInstances(t *testing.T) {
+func TestConfigTakesAccountTrafficOnceAcrossInstances(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -603,7 +603,7 @@ func TestConfigDoesNotDoubleCountCDTAggregateAcrossInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, instanceID := range []string{"i-1", "i-2"} {
-		if err := st.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-test", GroupKey: "group-1", InstanceID: instanceID, TrafficUsed: 12.5, TrafficAPIStatus: "fallback_cdt", TrafficAPIMessage: "CDT aggregate", UpdatedAt: 100}); err != nil {
+		if err := st.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-test", GroupKey: "group-1", InstanceID: instanceID, TrafficUsed: 12.5, TrafficAPIStatus: "ok", UpdatedAt: 100}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -623,7 +623,7 @@ func TestConfigDoesNotDoubleCountCDTAggregateAcrossInstances(t *testing.T) {
 	}
 	item := items[0].(map[string]any)
 	if item["usageUsed"] != 12.5 {
-		t.Fatalf("CDT aggregate was double-counted: %#v", item["usageUsed"])
+		t.Fatalf("account traffic was summed across instances: %#v", item["usageUsed"])
 	}
 }
 
@@ -657,6 +657,11 @@ type fakeRefreshClient struct {
 	deltaPoints   int
 	deltaErr      error
 	deltaCalls    int
+	cdtTraffic    float64
+}
+
+func (f *fakeRefreshClient) GetTraffic(context.Context, string) (float64, error) {
+	return f.cdtTraffic, nil
 }
 
 func (f *fakeRefreshClient) DescribeInstance(context.Context, string, string) (*cloud.Instance, error) {
@@ -705,6 +710,7 @@ func TestRefreshAccountUsesMonthlyCMSValueBeforeDelta(t *testing.T) {
 		deltaBytes:    10 * 1024 * 1024,
 		deltaLastMS:   now.UnixMilli(),
 		deltaPoints:   1,
+		cdtTraffic:    42,
 	}
 	srv := New(st, t.TempDir(), "", "setup-token", nil)
 	srv.CloudFactory = func(app.Account) cloud.Client { return fake }
@@ -728,7 +734,8 @@ func TestRefreshAccountUsesMonthlyCMSValueBeforeDelta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account.TrafficUsed != 8 || account.TrafficBillingMonth != month || account.TrafficAPIStatus != "ok" {
+	// The ledger keeps CMS for the shutdown check; the card shows the account total.
+	if account.TrafficUsed != 42 || account.TrafficBillingMonth != month || account.TrafficAPIStatus != "ok" {
 		t.Fatalf("account traffic state=%+v", account)
 	}
 }
