@@ -104,6 +104,8 @@ token 只用于首次初始化，不是管理员登录密码，也不能用于�
 | 创建实例时使用 EIP、更换 EIP，或释放实例时清理 EIP | [AliyunEIPFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuneipfullaccess) |
 | 查看余额和消费账单 | [AliyunBSSReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunbssreadonlyaccess) |
 
+| 创建实例时选择“自定义镜像（OSS 上传导入）” | [AliyunOSSFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunossfullaccess)；首次导入还需要账号下存在 `AliyunECSImageImportDefaultRole` 角色（给子账号加 `AliyunRAMFullAccess` 可自动创建，或在 ECS 控制台“导入镜像”页点一次授权） |
+
 不用对应功能时，可以不添加额外权限。**VPC 权限不包含 EIP 管理权限**，需要单独添加 EIP 权限。创建实例和 EIP 可能产生费用，请按需授权。
 
 ### 怎么看账号测试结果

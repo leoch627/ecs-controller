@@ -24,6 +24,9 @@ type Worker struct {
 	Log          *log.Logger
 	// DNSClient is the HTTP client for DNS provider APIs; nil uses a default.
 	DNSClient *http.Client
+	// CustomImagePoll is how often to check that a new instance is running
+	// before deleting its imported image; zero uses the default.
+	CustomImagePoll time.Duration
 }
 
 const cloudInventoryInterval = 10 * time.Minute
@@ -839,6 +842,25 @@ func (w *Worker) createECS(ctx context.Context, job *store.Job) (err error) {
 		_ = w.Store.UpdateTask(task.TaskID, map[string]any{"status": "failed", "step": "已回滚云资源", "error_message": err.Error(), "instance_id": createdInstance, "eip_allocation_id": allocationID})
 	}()
 
+	// Import the image before touching the network so a bad image file fails
+	// the task without creating anything that needs rolling back.
+	customImage := stringOr(payload, "osKey", "") == "custom"
+	if customImage && stringOr(payload, "imageId", "") == "" {
+		imageClient, ok := client.(cloud.CustomImageClient)
+		if !ok {
+			return fmt.Errorf("当前云客户端不支持自定义镜像导入")
+		}
+		_ = w.Store.UpdateTask(task.TaskID, map[string]any{"status": "running", "step": "准备自定义镜像"})
+		spec := cloud.CustomImageSpec{Name: stringOr(payload, "customImageName", ""), SourceURL: stringOr(payload, "customImageUrl", ""), DiskSizeGB: intField(payload, "systemDiskSize")}
+		imageID, imageErr := imageClient.EnsureCustomImage(ctx, task.RegionID, spec, func(step string) {
+			_ = w.Store.UpdateTask(task.TaskID, map[string]any{"step": step})
+		})
+		if imageErr != nil {
+			return imageErr
+		}
+		payload["imageId"] = imageID
+	}
+
 	_ = w.Store.UpdateTask(task.TaskID, map[string]any{"status": "running", "step": "准备网络"})
 	vpcID := stringOr(payload, "vpcId", "")
 	vswitchID := stringOr(payload, "vswitchId", "")
@@ -866,7 +888,12 @@ func (w *Worker) createECS(ctx context.Context, job *store.Job) (err error) {
 	if stringOr(payload, "imageId", "") == "" {
 		return fmt.Errorf("预检未返回有效镜像 ID")
 	}
-	run, err := client.RunInstances(ctx, cloud.RunRequest{RegionID: task.RegionID, ZoneID: zoneID, InstanceType: task.InstanceType, ImageID: stringOr(payload, "imageId", ""), InstanceName: stringOr(payload, "instanceName", "ecs-controller"), VPCID: vpcID, VSwitchID: vswitchID, SecurityGroupID: securityGroupID, Bandwidth: intField(payload, "internetMaxBandwidthOut"), DiskSize: intField(payload, "systemDiskSize"), DiskCategory: stringOr(payload, "systemDiskCategory", "cloud_essd"), PublicIPMode: stringOr(payload, "publicIpMode", "ecs_public_ip"), Password: password, LoginPort: intField(payload, "loginPort"), ClientToken: task.TaskID})
+	apiPassword := password
+	if customImage {
+		// Imported images carry their own credentials; see the preview step.
+		apiPassword = ""
+	}
+	run, err := client.RunInstances(ctx, cloud.RunRequest{RegionID: task.RegionID, ZoneID: zoneID, InstanceType: task.InstanceType, ImageID: stringOr(payload, "imageId", ""), InstanceName: stringOr(payload, "instanceName", "ecs-controller"), VPCID: vpcID, VSwitchID: vswitchID, SecurityGroupID: securityGroupID, Bandwidth: intField(payload, "internetMaxBandwidthOut"), DiskSize: intField(payload, "systemDiskSize"), DiskCategory: stringOr(payload, "systemDiskCategory", "cloud_essd"), PublicIPMode: stringOr(payload, "publicIpMode", "ecs_public_ip"), Password: apiPassword, LoginPort: intField(payload, "loginPort"), ClientToken: task.TaskID})
 	if err != nil {
 		return err
 	}
@@ -893,9 +920,50 @@ func (w *Worker) createECS(ctx context.Context, job *store.Job) (err error) {
 		return err
 	}
 	w.syncDDNSAccount(ctx, a)
+	if customImage {
+		_ = w.Store.UpdateTask(task.TaskID, map[string]any{"step": "清理自定义镜像"})
+		w.cleanupCustomImage(ctx, client, task.RegionID, createdInstance, stringOr(payload, "imageId", ""))
+	}
 	_ = w.Store.UpdateTask(task.TaskID, map[string]any{"status": "success", "step": "创建完成", "public_ip": publicIP, "login_user": stringOr(payload, "loginUser", "root"), "login_password": password, "error_message": ""})
 	w.dispatchEvent(ctx, notify.Event{Title: "ECS 创建成功", Summary: "实例已创建并启动，请保存一次性登录密码。", AccountID: group.Remark, Text: fmt.Sprintf("【ECS 控制台】ECS 创建成功\n账号: %s\n实例 ID: %s\n区域: %s\n规格: %s\n公网 IP: %s\n登录用户: %s\n初始密码: %s\n请立即保存并修改初始密码。", group.Remark, createdInstance, task.RegionID, task.InstanceType, publicIP, stringOr(payload, "loginUser", "root"), password), Fields: map[string]string{"instance_id": createdInstance, "region": task.RegionID, "public_ip": publicIP, "password": password}})
 	return nil
+}
+
+// cleanupCustomImage deletes the imported image once the instance is running,
+// so its snapshot stops costing storage. The instance keeps working without
+// it. Failures only leave the image behind, so they never fail the task.
+func (w *Worker) cleanupCustomImage(ctx context.Context, client cloud.Client, region, instanceID, imageID string) {
+	imageClient, ok := client.(cloud.CustomImageClient)
+	if !ok || imageID == "" {
+		return
+	}
+	// Wait for the system disk to be fully created from the image first.
+	running := false
+	for attempt := 0; attempt < 36 && ctx.Err() == nil; attempt++ {
+		if instance, err := client.DescribeInstance(ctx, region, instanceID); err == nil && instance.Status == "Running" {
+			running = true
+			break
+		}
+		sleep(ctx, w.customImagePoll())
+	}
+	if !running {
+		w.Store.AddLog("warning", "实例未在预期时间内进入运行状态，自定义镜像 "+imageID+" 未自动删除，请在阿里云控制台手动删除")
+		return
+	}
+	deleted, err := imageClient.DeleteImportedImage(ctx, region, imageID)
+	switch {
+	case err != nil:
+		w.Store.AddLog("warning", "自定义镜像 "+imageID+" 自动删除失败，请在阿里云控制台手动删除: "+err.Error())
+	case deleted:
+		w.Store.AddLog("info", "已自动删除导入的自定义镜像及快照: "+imageID)
+	}
+}
+
+func (w *Worker) customImagePoll() time.Duration {
+	if w.CustomImagePoll > 0 {
+		return w.CustomImagePoll
+	}
+	return 5 * time.Second
 }
 
 func allocateEIP(ctx context.Context, client cloud.Client, region string, bandwidth int) (string, string, error) {

@@ -181,7 +181,14 @@ type EIPDetailClient interface {
 	AllocateEIPLike(context.Context, string, EIPDetail) (string, string, error)
 }
 
-type Service struct{ ECS, VPC, EIP, CMS, CDT, BSS *RPCClient }
+type Service struct {
+	ECS, VPC, EIP, CMS, CDT, BSS, RAM *RPCClient
+
+	// Custom image import hooks; the zero values use real OSS and HTTP.
+	ImageOSS          *OSSClient
+	ImageHTTP         *http.Client
+	ImagePollInterval time.Duration
+}
 
 func NewRPCService(accessKey, secret, region string) *Service {
 	base := func(product, version, endpoint string) *RPCClient {
@@ -194,6 +201,7 @@ func NewRPCService(accessKey, secret, region string) *Service {
 		CMS: base("Cms", "2019-01-01", "https://metrics.aliyuncs.com/"),
 		CDT: base("CDT", "2021-08-13", "https://cdt.aliyuncs.com/"),
 		BSS: base("BssOpenApi", "2017-12-14", "https://business.aliyuncs.com/"),
+		RAM: base("Ram", "2015-05-01", "https://ram.aliyuncs.com/"),
 	}
 }
 

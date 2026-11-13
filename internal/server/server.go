@@ -13,6 +13,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1016,6 +1017,32 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 	}
 	osLabel, imageID := osInfo(osKey)
 	warnings := []any{"Go 版本已改为异步创建；请确认安全组来源和按量费用后继续"}
+	customImage := osKey == customImageOSKey
+	customURL := strings.TrimSpace(stringValue(data["customImageUrl"]))
+	customName := ""
+	if customImage {
+		if customURL == "" && strings.TrimSpace(stringValue(data["customImageName"])) == "" {
+			s.error(w, 400, "请填写镜像下载地址，或填写已有自定义镜像的名称")
+			return
+		}
+		if customURL != "" {
+			if parsed, urlErr := url.Parse(customURL); urlErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				s.error(w, 400, "镜像下载地址无效，需要 http(s) 直链")
+				return
+			}
+		}
+		customName = cloud.CustomImageName(stringValue(data["customImageName"]), customURL)
+		osLabel, imageID = "自定义镜像 "+customName, ""
+		data["customImageUrl"], data["customImageName"] = customURL, customName
+		// Imported images usually ship without cloud-init, so the password set
+		// through the ECS API would not apply; show the image's own password.
+		password := stringValue(data["customImagePassword"])
+		if password == "" {
+			password = "镜像默认密码"
+		}
+		data["loginPassword"] = password
+		warnings = append(warnings, "自定义镜像不会注入随机密码，请使用镜像自带的默认密码登录并立即修改")
+	}
 	previewClient := s.Cloud
 	if s.CloudFactory != nil {
 		previewClient = s.CloudFactory(app.Account{AccessKeyID: group.AccessKeyID, AccessKeySecret: group.AccessKeySecret, RegionID: group.RegionID, SiteType: group.SiteType})
@@ -1054,37 +1081,61 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 			return
 		}
 		data["zoneId"] = requestedZone
-		var images []map[string]any
-		var imageErr error
-		if imageProvider, ok := previewClient.(interface {
-			DescribeImagesForArchitecture(context.Context, string, string, string) ([]map[string]any, error)
-		}); ok {
-			images, imageErr = imageProvider.DescribeImagesForArchitecture(r.Context(), regionID, osKey, architecture)
+		if customImage {
+			imageClient, imageOK := previewClient.(cloud.CustomImageClient)
+			if !imageOK {
+				s.error(w, 503, "当前云客户端不支持自定义镜像导入")
+				return
+			}
+			existingID, existingStatus, findErr := imageClient.FindCustomImage(r.Context(), regionID, customName)
+			if findErr != nil {
+				s.error(w, 400, "自定义镜像预检失败: "+findErr.Error())
+				return
+			}
+			switch {
+			case existingStatus == "Available":
+				imageID = existingID
+				warnings = append(warnings, "当前区域已有同名自定义镜像 "+customName+"，将直接复用，不再上传；如果它是本面板之前导入的，实例运行后会自动删除")
+			case customURL == "":
+				s.error(w, 400, "当前区域没有名为 "+customName+" 的自定义镜像，请填写镜像下载地址")
+				return
+			default:
+				imageID = ""
+				warnings = append(warnings, "创建时会下载镜像、上传到临时 OSS Bucket 并导入为自定义镜像 "+customName+"，通常需要 5-15 分钟；Bucket 在导入完成后自动删除，自定义镜像和快照在实例运行后自动删除，不留存储费用")
+			}
 		} else {
-			imageProvider, imageOK := previewClient.(interface {
-				DescribeImages(context.Context, string, string) ([]map[string]any, error)
-			})
-			if imageOK {
-				images, imageErr = imageProvider.DescribeImages(r.Context(), regionID, osKey)
+			var images []map[string]any
+			var imageErr error
+			if imageProvider, ok := previewClient.(interface {
+				DescribeImagesForArchitecture(context.Context, string, string, string) ([]map[string]any, error)
+			}); ok {
+				images, imageErr = imageProvider.DescribeImagesForArchitecture(r.Context(), regionID, osKey, architecture)
 			} else {
-				imageErr = fmt.Errorf("云客户端不支持镜像查询")
+				imageProvider, imageOK := previewClient.(interface {
+					DescribeImages(context.Context, string, string) ([]map[string]any, error)
+				})
+				if imageOK {
+					images, imageErr = imageProvider.DescribeImages(r.Context(), regionID, osKey)
+				} else {
+					imageErr = fmt.Errorf("云客户端不支持镜像查询")
+				}
 			}
-		}
-		if imageErr != nil || len(images) == 0 {
-			if imageErr == nil {
-				imageErr = fmt.Errorf("未找到匹配的可用系统镜像")
+			if imageErr != nil || len(images) == 0 {
+				if imageErr == nil {
+					imageErr = fmt.Errorf("未找到匹配的可用系统镜像")
+				}
+				s.error(w, 400, "系统镜像预检失败: "+imageErr.Error())
+				return
 			}
-			s.error(w, 400, "系统镜像预检失败: "+imageErr.Error())
-			return
-		}
-		if explicitImage := stringValue(data["imageId"]); explicitImage != "" {
-			imageID = explicitImage
-		} else {
-			imageID = firstMapString(images, "ImageId", "imageId")
-		}
-		if imageID == "" {
-			s.error(w, 400, "镜像预检未返回 ImageId")
-			return
+			if explicitImage := stringValue(data["imageId"]); explicitImage != "" {
+				imageID = explicitImage
+			} else {
+				imageID = firstMapString(images, "ImageId", "imageId")
+			}
+			if imageID == "" {
+				s.error(w, 400, "镜像预检未返回 ImageId")
+				return
+			}
 		}
 		if options, diskErr := preflight.GetSystemDiskOptions(r.Context(), regionID, requestedZone, instanceType); diskErr != nil {
 			s.error(w, 400, "系统盘预检失败: "+diskErr.Error())
@@ -1093,6 +1144,11 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 			selected := selectDiskOption(options, diskCategory)
 			diskCategory = stringValue(selected["value"])
 			minSize, maxSize := number(selected["min"], 20), number(selected["max"], 32768)
+			if customImage {
+				// A custom image may be far smaller than the 20 GB floor that
+				// DescribeAvailableResource reports for public images.
+				minSize = 1
+			}
 			if diskSize < minSize {
 				diskSize = minSize
 			}
@@ -1104,7 +1160,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 			s.error(w, 400, "当前规格没有可用系统盘类型")
 			return
 		}
-	} else if stringValue(data["imageId"]) != "" {
+	} else if stringValue(data["imageId"]) != "" && !customImage {
 		imageID = stringValue(data["imageId"])
 	}
 	data["zoneId"], data["imageId"], data["systemDiskCategory"], data["systemDiskSize"] = stringValue(data["zoneId"]), imageID, diskCategory, diskSize
@@ -1113,7 +1169,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 	s.previews[id] = data
 	s.mu.Unlock()
 	minDisk, maxDisk := number(data["systemDiskMin"], 20), number(data["systemDiskMax"], 32768)
-	summary := map[string]any{"account": map[string]any{"label": group.Remark, "groupKey": group.GroupKey, "accessKeyId": maskAccessKey(group.AccessKeyID)}, "regionId": data["regionId"], "zoneId": data["zoneId"], "instanceType": instanceType, "instanceName": name, "osKey": osKey, "osLabel": osLabel, "imageId": imageID, "loginUser": loginUser(osKey), "loginPort": loginPort, "clientCidrIp": data["clientCidrIp"], "systemDisk": map[string]any{"category": diskCategory, "size": diskSize, "min": minDisk, "max": maxDisk, "unit": "GB"}, "network": map[string]any{"vpc": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/16"}, "vswitch": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/24"}, "securityGroup": map[string]any{"name": "ecs-controller", "cidr": stringValue(data["clientCidrIp"]), "rules": []string{fmt.Sprintf("TCP %d / %s", loginPort, stringValue(data["clientCidrIp"]))}}}, "internetMaxBandwidthOut": bandwidth, "publicIpMode": publicMode, "publicIpModeLabel": map[string]string{"eip": "EIP 弹性公网 IP", "ecs_public_ip": "ECS 普通公网 IP"}[publicMode], "accountGroupKey": groupKey}
+	summary := map[string]any{"account": map[string]any{"label": group.Remark, "groupKey": group.GroupKey, "accessKeyId": maskAccessKey(group.AccessKeyID)}, "regionId": data["regionId"], "zoneId": data["zoneId"], "instanceType": instanceType, "instanceName": name, "osKey": osKey, "osLabel": osLabel, "imageId": imageID, "customImage": customImage, "loginUser": loginUser(osKey), "loginPort": loginPort, "clientCidrIp": data["clientCidrIp"], "systemDisk": map[string]any{"category": diskCategory, "size": diskSize, "min": minDisk, "max": maxDisk, "unit": "GB"}, "network": map[string]any{"vpc": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/16"}, "vswitch": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/24"}, "securityGroup": map[string]any{"name": "ecs-controller", "cidr": stringValue(data["clientCidrIp"]), "rules": []string{fmt.Sprintf("TCP %d / %s", loginPort, stringValue(data["clientCidrIp"]))}}}, "internetMaxBandwidthOut": bandwidth, "publicIpMode": publicMode, "publicIpModeLabel": map[string]string{"eip": "EIP 弹性公网 IP", "ecs_public_ip": "ECS 普通公网 IP"}[publicMode], "accountGroupKey": groupKey}
 	if summary["publicIpModeLabel"] == "" {
 		summary["publicIpModeLabel"] = publicMode
 	}
@@ -2062,6 +2118,9 @@ func randomToken(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 func generatePassword() string { return randomToken(12) + "Aa1!" }
+
+const customImageOSKey = "custom"
+
 func loginUser(osKey string) string {
 	if strings.HasPrefix(strings.ToLower(osKey), "windows") {
 		return "Administrator"
