@@ -63,6 +63,7 @@ var LightsailRegions = []struct{ ID, Name string }{
 	{"eu-central-1", "欧洲（法兰克福）"},
 	{"eu-north-1", "欧洲（斯德哥尔摩）"},
 	{"ap-south-1", "亚太（孟买）"},
+	{"ap-east-1", "亚太（香港）"},
 	{"ap-southeast-1", "亚太（新加坡）"},
 	{"ap-southeast-2", "亚太（悉尼）"},
 	{"ap-southeast-3", "亚太（雅加达）"},
