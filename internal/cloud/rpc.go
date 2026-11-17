@@ -143,6 +143,8 @@ func retryableRPCError(err error) bool {
 }
 
 type APIError struct {
+	// Provider is "aws" for Lightsail; empty means Alibaba Cloud.
+	Provider   string
 	Code       string
 	Message    string
 	HTTPStatus int
@@ -160,13 +162,20 @@ func IsCredentialError(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		code := strings.ToLower(apiErr.Code)
-		return strings.Contains(code, "accesskey") || strings.Contains(code, "signature") || strings.Contains(code, "forbidden") || strings.Contains(code, "unauthorized") || strings.Contains(code, "invalidaccess")
+		return strings.Contains(code, "accesskey") || strings.Contains(code, "signature") || strings.Contains(code, "forbidden") || strings.Contains(code, "unauthorized") || strings.Contains(code, "invalidaccess") ||
+			strings.Contains(code, "unrecognizedclient") || strings.Contains(code, "invalidclienttokenid")
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "accesskey") || strings.Contains(message, "signature") || strings.Contains(message, "unauthorized")
 }
 
-func (e *APIError) Error() string { return fmt.Sprintf("aliyun %s: %s", e.Code, e.Message) }
+func (e *APIError) Error() string {
+	provider := e.Provider
+	if provider == "" {
+		provider = "aliyun"
+	}
+	return fmt.Sprintf("%s %s: %s", provider, e.Code, e.Message)
+}
 
 func nonce() string {
 	var b [16]byte

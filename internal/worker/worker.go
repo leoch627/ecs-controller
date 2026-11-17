@@ -174,7 +174,7 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 						w.dispatchEvent(ctx, notify.Event{Title: "阿里云凭据异常", Summary: "已暂停自动停机保护", AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】阿里云凭据异常\n账号/实例: %s\n实例 ID: %s\n错误: %s\n系统已暂停自动停机保护，请更新 AK 后恢复。", accountLabel(account), account.InstanceID, trafficErr.Error()), Fields: map[string]string{"instance_id": account.InstanceID, "reason": "credential_invalid"}})
 						account.ProtectionNotifiedAt = now.Unix()
 					}
-					if err := w.Store.UpsertAccount(account); err != nil {
+					if err := w.saveMonitored(&account); err != nil {
 						w.Store.AddLog("error", "保存流量保护状态失败: "+err.Error())
 					}
 					continue
@@ -217,7 +217,7 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 					}
 				}
 				w.applyTrafficProtection(ctx, client, &account, now, threshold, thresholdAction, shutdownMode, traffic, true, keepAlive, monthlyAutoStart)
-				if err := w.Store.UpsertAccount(account); err != nil {
+				if err := w.saveMonitored(&account); err != nil {
 					w.Store.AddLog("error", "保存监控状态失败: "+err.Error())
 				}
 				if account.PublicIP != "" && account.PublicIP != oldPublicIP {
@@ -229,6 +229,18 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 			w.runDailyTrafficSummary(ctx, now)
 		}
 	}
+}
+
+// saveMonitored stores a monitor pass without undoing an IP replacement that
+// finished while the pass was running: the monitor never changes the EIP
+// binding itself, so whatever the row holds now is newer than its copy.
+func (w *Worker) saveMonitored(account *app.Account) error {
+	if current, err := w.Store.Account(account.ID, true); err == nil &&
+		(current.EIPAllocationID != account.EIPAllocationID || current.EIPAddress != account.EIPAddress || current.PublicIPMode != account.PublicIPMode) {
+		account.PublicIPMode, account.EIPAllocationID, account.EIPAddress, account.EIPManaged = current.PublicIPMode, current.EIPAllocationID, current.EIPAddress, current.EIPManaged
+		account.PublicIP, account.InternetBandwidth = current.PublicIP, current.InternetBandwidth
+	}
+	return w.Store.UpsertAccount(*account)
 }
 
 func (w *Worker) reconcileCloudInventory(ctx context.Context, now time.Time) {
@@ -382,7 +394,7 @@ func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, a
 		if account.ProtectionSuspendReason == "" {
 			account.ProtectionSuspendReason = "traffic_api_error"
 		}
-		if err := w.Store.UpsertAccount(*account); err != nil {
+		if err := w.saveMonitored(account); err != nil {
 			w.Store.AddLog("error", "保存流量保护暂停状态失败: "+err.Error())
 		}
 		return
@@ -428,7 +440,7 @@ func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, a
 			}
 		}
 	}
-	if err := w.Store.UpsertAccount(*account); err != nil {
+	if err := w.saveMonitored(account); err != nil {
 		w.Store.AddLog("error", "保存缓存自动化状态失败: "+err.Error())
 	}
 }

@@ -208,6 +208,7 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS passkey_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, credential_id TEXT UNIQUE NOT NULL, credential_data TEXT NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS passkey_challenges (id TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT DEFAULT '', session_data TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS instance_expiry (instance_id TEXT PRIMARY KEY, charge_type TEXT DEFAULT '', expired_at INTEGER DEFAULT 0, queued_at INTEGER DEFAULT 0, updated_at INTEGER DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS ip_checks (account_id INTEGER PRIMARY KEY, ip TEXT DEFAULT '', status TEXT DEFAULT '', detail TEXT DEFAULT '', checked_at INTEGER DEFAULT 0)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.DB.Exec(statement); err != nil {
@@ -991,6 +992,7 @@ func (s *Store) DeleteInstanceData(id int64) error {
 		{`DELETE FROM billing_cache WHERE account_id=?`, []any{id}},
 		{`DELETE FROM instance_traffic_usage WHERE account_id=?`, []any{id}},
 		{`DELETE FROM telegram_action_tokens WHERE account_id=?`, []any{id}},
+		{`DELETE FROM ip_checks WHERE account_id=?`, []any{id}},
 		{`DELETE FROM jobs WHERE entity_key=?`, []any{strconv.FormatInt(id, 10)}},
 		// Logs have no structured entity column in older databases. Remove
 		// messages containing this exact instance ID to avoid retaining its

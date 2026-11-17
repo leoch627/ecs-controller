@@ -38,12 +38,12 @@ func main() {
 	srv.CookieSecure = env("ECS_COOKIE_SECURE", "0") == "1" || strings.EqualFold(env("ECS_COOKIE_SECURE", "0"), "true")
 	srv.UpdateDir = env("ECS_UPDATE_DIR", "")
 	srv.CloudFactory = func(group app.Account) cloud.Client {
-		return cloud.NewRPCService(group.AccessKeyID, group.AccessKeySecret, group.RegionID)
+		return cloud.NewClient(group.AccessKeyID, group.AccessKeySecret, group.RegionID, group.SiteType)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	w := &worker.Worker{Store: st, Cloud: client, CloudFactory: func(group app.AccountGroup) cloud.Client {
-		return cloud.NewRPCService(group.AccessKeyID, group.AccessKeySecret, group.RegionID)
+		return cloud.NewClient(group.AccessKeyID, group.AccessKeySecret, group.RegionID, group.SiteType)
 	}, Log: log.Default()}
 	go w.Run(ctx)
 	go w.Monitor(ctx, time.Duration(numberEnv("ECS_MONITOR_INTERVAL", 60))*time.Second)

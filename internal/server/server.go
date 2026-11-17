@@ -369,6 +369,10 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 		s.deleteInstance(w, data)
 	case "replace_instance_ip":
 		s.replaceIP(w, data)
+	case "check_instance_ip":
+		s.checkInstanceIP(w, data)
+	case "test_ip_probe":
+		s.testIPProbe(w, data)
 	case "refresh_account", "sync_account_group", "restore_schedule_block":
 		if action == "refresh_account" {
 			s.refreshAccount(w, data)
@@ -435,7 +439,7 @@ func (s *Server) config(w http.ResponseWriter) {
 			m.accountID = account.ID
 		}
 	}
-	result := map[string]any{"admin_password": "********", "admin_password_set": s.Store.IsInitialized(), "password_login_enabled": settingBool(settings["password_login_enabled"], true), "passkey_count": s.Store.PasskeyCount(), "traffic_threshold": numberString(settings["traffic_threshold"], 95), "shutdown_mode": fallback(settings["shutdown_mode"], "KeepCharging"), "threshold_action": fallback(settings["threshold_action"], "stop_and_notify"), "keep_alive": settings["keep_alive"] == "1", "monthly_auto_start": settings["monthly_auto_start"] == "1", "api_interval": numberString(settings["api_interval"], 600), "enable_billing": settings["enable_billing"] == "1", "AppBrand": map[string]any{"name": fallback(settings["app_name"], "ECS 控制台"), "logo_url": settings["app_logo_url"]}, "Notification": notificationSettings(settings), "Ddns": s.dnsConfig(), "DnsProviders": dns.Providers(), "Accounts": []any{}}
+	result := map[string]any{"admin_password": "********", "admin_password_set": s.Store.IsInitialized(), "password_login_enabled": settingBool(settings["password_login_enabled"], true), "passkey_count": s.Store.PasskeyCount(), "traffic_threshold": numberString(settings["traffic_threshold"], 95), "shutdown_mode": fallback(settings["shutdown_mode"], "KeepCharging"), "threshold_action": fallback(settings["threshold_action"], "stop_and_notify"), "keep_alive": settings["keep_alive"] == "1", "monthly_auto_start": settings["monthly_auto_start"] == "1", "api_interval": numberString(settings["api_interval"], 600), "enable_billing": settings["enable_billing"] == "1", "AppBrand": map[string]any{"name": fallback(settings["app_name"], "ECS 控制台"), "logo_url": settings["app_logo_url"]}, "Notification": notificationSettings(settings), "Ddns": s.dnsConfig(), "DnsProviders": dns.Providers(), "IpCheck": s.ipCheckConfig(), "Accounts": []any{}}
 	items := result["Accounts"].([]any)
 	for _, g := range groups {
 		m := metrics[g.GroupKey]
@@ -736,6 +740,7 @@ func laterTimestamp(current, candidate string) string {
 func (s *Server) status(w http.ResponseWriter) {
 	accounts, _ := s.Store.LoadAccounts(false)
 	expiries := s.Store.ExpiryByInstance()
+	ipChecks := s.Store.IPChecks()
 	data := make([]map[string]any, 0)
 	for _, a := range accounts {
 		if a.InstanceID == "" {
@@ -750,8 +755,15 @@ func (s *Server) status(w http.ResponseWriter) {
 			label = a.AccessKeyID
 		}
 		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95)), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
+		item := data[len(data)-1]
+		item["siteType"] = a.SiteType
+		_, item["ipReplacing"] = s.ipReplacing.Load(a.ID)
+		// A result for an earlier IP says nothing about the current one.
+		if check, ok := ipChecks[a.ID]; ok && check.IP != "" && check.IP == a.PublicIP {
+			item["ipCheck"] = map[string]any{"ip": check.IP, "status": check.Status, "detail": check.Detail, "checkedAt": check.CheckedAt}
+		}
 	}
-	s.json(w, 200, map[string]any{"data": data, "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
+	s.json(w, 200, map[string]any{"data": data, "ip_check_enabled": s.ipCheckSettings().enabled(), "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
 }
 
 func (s *Server) saveConfig(data map[string]any) error {
@@ -801,6 +813,11 @@ func (s *Server) saveConfig(data map[string]any) error {
 	}
 	if ddns, ok := data["Ddns"].(map[string]any); ok {
 		if err := s.saveDNSConfig(ddns); err != nil {
+			return err
+		}
+	}
+	if ipCheck, ok := data["IpCheck"].(map[string]any); ok {
+		if err := s.saveIPCheckConfig(ipCheck); err != nil {
 			return err
 		}
 	}
@@ -954,6 +971,10 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 	}
 	if group == nil {
 		s.error(w, 400, "账号组不存在")
+		return
+	}
+	if group.SiteType == cloud.SiteAWS {
+		s.error(w, 400, "AWS Lightsail 账号暂不支持在面板里创建实例，请在 Lightsail 控制台创建后点击同步")
 		return
 	}
 	regionID := stringValue(data["regionId"])
@@ -1392,153 +1413,6 @@ func (s *Server) deleteInstance(w http.ResponseWriter, data map[string]any) {
 	s.dispatchEvent(rctx(), notify.Event{Title: "实例释放已提交", Summary: "实例已进入后台释放队列。", AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】实例释放已提交\n实例: %s\n实例 ID: %s\n区域: %s\n后台队列会继续处理 ECS、EIP 和 DDNS 清理。", accountDisplay(*a), a.InstanceID, a.RegionID), Fields: map[string]string{"instance_id": a.InstanceID, "region": a.RegionID, "action": "release"}})
 	s.json(w, 202, map[string]any{"success": true, "queued": true, "jobId": jobID})
 }
-func (s *Server) replaceIP(w http.ResponseWriter, data map[string]any) {
-	id := int64(number(data["accountId"], 0))
-	a, err := s.Store.Account(id, false)
-	if err != nil {
-		s.error(w, 404, "账号不存在")
-		return
-	}
-	if a.CloudPresence == "missing" {
-		s.error(w, 409, "云端实例不存在，无法更换公网 IP")
-		return
-	}
-	client := s.Cloud
-	if s.CloudFactory != nil {
-		client = s.CloudFactory(*a)
-	}
-	if client == nil {
-		s.cloudUnavailable(w)
-		return
-	}
-	if a.InstanceStatus == "Releasing" {
-		s.error(w, 409, "实例正在释放，无法更换公网 IP")
-		return
-	}
-	// An empty allocation ID means an earlier attempt already released the old
-	// EIP; the swap then resumes by binding a new one.
-	if a.PublicIPMode != "eip" {
-		s.error(w, 400, "当前实例没有绑定 EIP，无法更换公网 IP")
-		return
-	}
-	if _, busy := s.ipReplacing.LoadOrStore(id, true); busy {
-		s.error(w, 409, "这台实例正在更换公网 IP，请稍候")
-		return
-	}
-	defer s.ipReplacing.Delete(id)
-
-	oldAllocationID, oldIP := a.EIPAllocationID, a.PublicIP
-	template := cloud.EIPDetail{Bandwidth: a.InternetBandwidth}
-	bound := oldAllocationID != ""
-	detailClient, hasDetail := client.(cloud.EIPDetailClient)
-	if hasDetail && oldAllocationID != "" {
-		eip, err := detailClient.DescribeEIP(rctx(), a.RegionID, oldAllocationID)
-		switch {
-		case cloud.IsNotFound(err):
-			oldAllocationID, bound = "", false
-		case err != nil:
-			s.error(w, 400, "读取当前 EIP 失败: "+err.Error())
-			return
-		default:
-			if reason := eipReplaceBlocker(*eip, a.InstanceID); reason != "" {
-				s.error(w, 400, reason)
-				return
-			}
-			if eip.Address != "" {
-				oldIP = eip.Address
-			}
-			if eip.Bandwidth < 1 {
-				eip.Bandwidth = template.Bandwidth
-			}
-			template, bound = *eip, eip.InstanceID != ""
-		}
-	}
-	bandwidth := template.Bandwidth
-
-	// Release the old EIP before allocating the new one, as in the console:
-	// the swap never holds two EIPs, so it cannot hit the EIP quota or leave
-	// an extra one billing for idle time.
-	if oldAllocationID != "" {
-		s.settleIPTraffic(client, *a, oldIP)
-		if bound {
-			if err := client.UnassociateEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
-				s.error(w, 400, "旧 EIP 解绑失败: "+err.Error())
-				return
-			}
-		}
-		if hasDetail {
-			// Release is rejected until the asynchronous unbind finishes.
-			if err := waitEIPAvailable(rctx(), detailClient, a.RegionID, oldAllocationID, eipUnbindTimeout); err != nil {
-				s.Store.AddLog("warning", "等待旧 EIP 解绑超时: "+err.Error())
-			}
-		}
-		if err := client.ReleaseEIP(rctx(), a.RegionID, oldAllocationID); err != nil && !cloud.IsNotFound(err) {
-			message := "旧 EIP 释放失败: " + err.Error()
-			if bound && client.AssociateEIP(rctx(), a.RegionID, oldAllocationID, a.InstanceID) == nil {
-				message += "，已重新绑定旧 EIP"
-			} else {
-				message += "，旧 EIP 已解绑，请稍后再次更换"
-			}
-			s.Store.AddLog("error", message)
-			s.error(w, 400, message)
-			return
-		}
-		if err := s.Store.RetireInstanceTrafficIP(id, a.InstanceID, time.Now().Format("2006-01"), time.Now().UnixMilli()); err != nil {
-			s.Store.AddLog("warning", "保存旧 IP 本月流量失败，新 IP 的流量可能从零开始: "+err.Error())
-		}
-		// From here the instance has no public IP. Record that so a failure
-		// below leaves a state the next attempt resumes from.
-		if err := s.Store.UpdateNetwork(id, map[string]any{"eip_allocation_id": "", "eip_address": "", "public_ip": "", "eip_managed": false}); err != nil {
-			s.Store.AddLog("warning", "旧 EIP 已释放，但本地状态保存失败: "+err.Error())
-		}
-		// The old EIP went back to Alibaba Cloud's pool and may be handed to
-		// someone else, so take it out of DNS.
-		if _, err := s.Store.EnqueueDNSCleanup(oldIP, a.InstanceID, accountDisplay(*a), "ip_replaced"); err != nil {
-			s.Store.AddLog("warning", "旧 IP 解析清理任务入队失败: "+err.Error())
-		}
-	}
-	failWithoutIP := func(message string) {
-		message += "。实例当前没有公网 IP，可再次点击更换 IP 重试"
-		s.Store.AddLog("error", message)
-		s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 更换失败", Summary: fmt.Sprintf("%s 当前没有公网 IP", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】公网 IP 更换失败\n实例: %s\n旧 IP: %s\n区域: %s\n原因: %s", accountDisplay(*a), oldIP, a.RegionID, message), Fields: map[string]string{"old_ip": oldIP, "instance_id": a.InstanceID}})
-		s.error(w, 400, message)
-	}
-
-	// The replacement is always pay-as-you-go and billed by traffic.
-	var alloc, ip string
-	if hasDetail {
-		alloc, ip, err = detailClient.AllocateEIPLike(rctx(), a.RegionID, template)
-		if err != nil {
-			// The old line or resource group may be refused; fall back to defaults.
-			s.Store.AddLog("warning", "按旧 EIP 线路申请新 EIP 失败，改用默认线路: "+err.Error())
-		}
-	}
-	if !hasDetail || err != nil {
-		alloc, ip, err = allocateEIP(rctx(), client, a.RegionID, bandwidth)
-	}
-	if err != nil {
-		failWithoutIP("新 EIP 申请失败: " + err.Error())
-		return
-	}
-	if err = client.AssociateEIP(rctx(), a.RegionID, alloc, a.InstanceID); err != nil {
-		message := "新 EIP 绑定失败: " + err.Error()
-		// An unbound EIP still bills for idle time; the next attempt allocates afresh.
-		if releaseErr := client.ReleaseEIP(rctx(), a.RegionID, alloc); releaseErr != nil {
-			message += fmt.Sprintf("；新 EIP %s 释放失败，请到阿里云控制台手动释放: %s", alloc, releaseErr.Error())
-		}
-		failWithoutIP(message)
-		return
-	}
-	// The controller created the new EIP, so instance release cleans it up.
-	if err := s.Store.UpdateNetwork(id, map[string]any{"eip_allocation_id": alloc, "eip_address": ip, "public_ip": ip, "public_ip_mode": "eip", "eip_managed": true, "internet_max_bandwidth_out": bandwidth}); err != nil {
-		s.error(w, 500, "新 EIP 已绑定，但本地状态保存失败: "+err.Error())
-		return
-	}
-	s.Store.AddLog("info", fmt.Sprintf("%s 公网 IP 已更换: %s -> %s", accountDisplay(*a), oldIP, ip))
-	text := fmt.Sprintf("【ECS 控制台】公网 IP 已更换\n实例: %s\n旧 IP: %s\n新 IP: %s\n区域: %s", accountDisplay(*a), oldIP, ip, a.RegionID)
-	s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: text, Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
-	s.json(w, 200, map[string]any{"success": true, "message": "公网 IP 已更换", "data": map[string]any{"publicIp": ip, "publicIpMode": "eip", "eipAllocationId": alloc, "eipAddress": ip, "eipManaged": true, "internetMaxBandwidthOut": bandwidth}})
-}
 
 // settleIPTraffic records the month's traffic on ip just before it is taken
 // away, since CMS stops reporting it once the IP leaves the instance.
@@ -1822,7 +1696,7 @@ func (s *Server) fetchInstances(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 400, "AK、Secret 和区域不能为空")
 		return
 	}
-	instances, err := cloud.NewRPCService(accessKey, secret, region).DescribeInstances(rctx(), region)
+	instances, err := cloud.NewClient(accessKey, secret, region, stringValue(data["siteType"])).DescribeInstances(rctx(), region)
 	if err != nil {
 		s.error(w, 400, err.Error())
 		return
@@ -1850,11 +1724,11 @@ func (s *Server) testAccount(w http.ResponseWriter, r *http.Request, data map[st
 		return
 	}
 	siteType := fallback(stringValue(account["siteType"]), "china")
-	if siteType != "china" && siteType != "international" {
-		s.error(w, 400, "请选择中国站或国际站")
+	if siteType != "china" && siteType != "international" && siteType != cloud.SiteAWS {
+		s.error(w, 400, "请选择中国站、国际站或 AWS Lightsail")
 		return
 	}
-	var client cloud.Client = cloud.NewRPCService(accessKey, secret, region)
+	var client cloud.Client = cloud.NewClient(accessKey, secret, region, siteType)
 	if s.CloudFactory != nil {
 		client = s.CloudFactory(app.Account{AccessKeyID: accessKey, AccessKeySecret: secret, RegionID: region, SiteType: siteType})
 	}
@@ -2020,7 +1894,7 @@ func (s *Server) csrfOK(w http.ResponseWriter, r *http.Request) bool {
 }
 func (s *Server) mutating(a string) bool {
 	switch a {
-	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup", "test_dns", "retry_dns_cleanup":
+	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "check_instance_ip", "test_ip_probe", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup", "test_dns", "retry_dns_cleanup":
 		return true
 	}
 	return false

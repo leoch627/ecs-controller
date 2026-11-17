@@ -5696,7 +5696,7 @@
                                     v-model="manageFilter.region"
                                     class="glass-select"
                                     placeholder="所有区域"
-                                    :options="[{ value: '', label: '所有区域' }, ...aliyunRegions.map(region => ({ value: region.id, label: region.name }))]"
+                                    :options="[{ value: '', label: '所有区域' }, ...allRegions.map(region => ({ value: region.id, label: region.name }))]"
                                 />
                                 <app-select
                                     v-model="manageFilter.status"
@@ -5752,7 +5752,8 @@
                                     </div>
                                     <div class="summary-cell">
                                         <div class="summary-primary font-mono text-sm">{{ inst.publicIp || inst.privateIp || '-' }}</div>
-                                        <div class="summary-secondary">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</div>
+                                        <div class="summary-secondary">{{ publicIpModeLabel(inst) }}</div>
+                                        <span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span>
                                     </div>
                                     <div class="summary-cell center-column">
                                         <div class="summary-primary text-sm">{{ formatPublicBandwidth(inst) }}</div>
@@ -5780,7 +5781,8 @@
                                         <div v-else class="row-actions">
                                             <button v-if="inst.instanceStatus === 'Stopped' || inst.instanceStatus === 'Unknown'" @click="controlInstance(inst.id, 'start')" class="success-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">启动</button>
                                             <button v-if="inst.instanceStatus === 'Running'" @click="controlInstance(inst.id, 'stop')" class="warning-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">停止</button>
-                                            <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">更换 IP</button>
+                                            <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id) || inst.ipReplacing">{{ inst.ipReplacing ? '更换中...' : '更换 IP' }}</button>
+                                            <button v-if="canCheckIp(inst)" @click="checkInstanceIp(inst.id)" class="ghost-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id) || inst.ipReplacing" title="从国内探测机检测当前 IP 是否被墙">检测</button>
                                             <button @click="deleteInstance(inst.id)" class="danger-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">释放</button>
                                         </div>
                                     </div>
@@ -5805,7 +5807,7 @@
                                 <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
                                     <div><span class="text-[var(--muted)]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
                                     <div><span class="text-[var(--muted)]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
-                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
+                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ publicIpModeLabel(inst) }}</p><span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span></div>
                                     <div>
                                         <span class="text-[var(--muted)]">公网带宽峰值</span>
                                         <p class="mt-1 text-sm font-semibold">{{ formatPublicBandwidth(inst) }}</p>
@@ -5817,7 +5819,8 @@
                                 <div v-else class="mt-4 flex gap-2">
                                     <button v-if="inst.instanceStatus === 'Stopped' || inst.instanceStatus === 'Unknown'" @click="controlInstance(inst.id, 'start')" class="success-button flex-1" :disabled="isRefreshingInstance(inst.id)">启动</button>
                                     <button v-if="inst.instanceStatus === 'Running'" @click="controlInstance(inst.id, 'stop')" class="warning-button flex-1" :disabled="isRefreshingInstance(inst.id)">停止</button>
-                                    <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button flex-1" :disabled="isRefreshingInstance(inst.id)">更换 IP</button>
+                                    <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button flex-1" :disabled="isRefreshingInstance(inst.id) || inst.ipReplacing">{{ inst.ipReplacing ? '更换中...' : '更换 IP' }}</button>
+                                    <button v-if="canCheckIp(inst)" @click="checkInstanceIp(inst.id)" class="ghost-button flex-1" :disabled="isRefreshingInstance(inst.id) || inst.ipReplacing">检测</button>
                                     <button @click="deleteInstance(inst.id)" class="danger-button flex-1" :disabled="isRefreshingInstance(inst.id)">释放</button>
                                 </div>
                             </article>
@@ -5860,7 +5863,7 @@
                                         <div class="summary-secondary">实例会同步到这个备注名下</div>
                                     </div>
                                     <div class="summary-cell">
-                                        <div class="summary-primary">{{ getRegionName(acc.regionId) }}</div>
+                                        <div class="summary-primary">{{ getRegionName(acc.regionId, acc.siteType) }}</div>
                                     </div>
                                     <div class="summary-cell">
                                         <div class="summary-primary">{{ getSiteTypeLabel(acc.siteType) }}</div>
@@ -5932,7 +5935,7 @@
                                 <div class="account-card-grid">
                                     <div class="account-card-grid__meta">
                                         <span class="account-card-grid__label">区域</span>
-                                        <strong class="account-card-grid__value">{{ getRegionName(acc.regionId) }}</strong>
+                                        <strong class="account-card-grid__value">{{ getRegionName(acc.regionId, acc.siteType) }}</strong>
                                     </div>
                                     <div class="account-card-grid__meta">
                                         <span class="account-card-grid__label">站点</span>
@@ -6238,6 +6241,36 @@
                                                     @click="retryDnsCleanup(task)" :disabled="retryingDnsCleanup === task.id">{{ retryingDnsCleanup === task.id ? '提交中...' : task.status === 'failed' ? '重试' : '重新执行' }}</button>
                                             </li>
                                         </ul>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section v-if="currentSettingsTab === 'ipcheck'" class="settings-section">
+                                <header class="settings-section__head"><h3>被墙检测</h3></header>
+                                <div class="settings-fields">
+                                    <p class="settings-hint">更换公网 IP 后，从一台国内机器连接新 IP 的指定端口；面板自己也会连一次作对照。面板连得上而国内连不上，判定为被墙并自动再换；两边都连不上则无法判断（多半是端口没开），不会继续换。国内机器上需要运行探测程序 gfw-probe，部署方法见 README 的「被墙检测」。</p>
+                                    <div class="settings-field">
+                                        <label for="ipcheck-url">国内探测机地址</label>
+                                        <div class="dns-domain-row">
+                                            <input id="ipcheck-url" v-model.trim="config.IpCheck.probe_url" class="glass-input" placeholder="例如 http://国内机器IP:8433" autocomplete="off" spellcheck="false">
+                                            <button type="button" class="ghost-button" @click="testIpProbe" :disabled="testingIpProbe || !config.IpCheck.probe_url">{{ testingIpProbe ? '测试中...' : '测试连接' }}</button>
+                                        </div>
+                                        <p class="settings-hint">留空即关闭检测，更换 IP 只换一次。测试会使用当前填写的内容，无需先保存。</p>
+                                        <div v-if="ipProbeTestResult" class="dns-test-result" :class="{ 'is-error': !ipProbeTestResult.success }" role="status">{{ ipProbeTestResult.message }}</div>
+                                    </div>
+                                    <div class="settings-field">
+                                        <label for="ipcheck-token">探测密钥</label>
+                                        <input id="ipcheck-token" v-model="config.IpCheck.probe_token" type="password" class="glass-input" placeholder="和探测程序的 PROBE_TOKEN 一致，至少 16 位" autocomplete="new-password">
+                                    </div>
+                                    <div class="settings-field">
+                                        <label for="ipcheck-port">检测端口</label>
+                                        <input id="ipcheck-port" v-model.number="config.IpCheck.port" type="number" min="1" max="65535" class="glass-input" placeholder="22">
+                                        <p class="settings-hint">填实例上实际对外提供服务的 TCP 端口，并确认实例防火墙已放行。只被封了某个端口时，要检测那个端口才看得出来。</p>
+                                    </div>
+                                    <div class="settings-field">
+                                        <label for="ipcheck-max">被墙时最多更换次数</label>
+                                        <input id="ipcheck-max" v-model.number="config.IpCheck.max_swaps" type="number" min="1" max="10" class="glass-input" placeholder="5">
+                                        <p class="settings-hint">包含第一次更换。换到这个次数仍被墙就停下并发通知。</p>
                                     </div>
                                 </div>
                             </section>
@@ -6689,23 +6722,27 @@
                             v-model="accountDraft.regionId"
                             class="glass-select"
                             placeholder="请选择区域"
-                            :options="[{ value: '', label: '请选择区域' }, ...aliyunRegions.map(region => ({ value: region.id, label: region.name }))]"
+                            :options="[{ value: '', label: '请选择区域' }, ...regionsForSite(accountDraft.siteType).map(region => ({ value: region.id, label: region.name }))]"
                         />
                     </div>
                     <div>
-                        <label class="field-label">站点</label>
+                        <label class="field-label">云平台 / 站点</label>
                         <app-select
                             v-model="accountDraft.siteType"
                             class="glass-select"
                             :options="[
-                                { value: 'china', label: '中国站' },
-                                { value: 'international', label: '国际站' }
+                                { value: 'china', label: '阿里云中国站' },
+                                { value: 'international', label: '阿里云国际站' },
+                                { value: 'aws', label: 'AWS Lightsail' }
                             ]"
                         />
                     </div>
                     <div>
                         <label class="field-label">账号可用流量（GB）</label>
                         <input v-model.number="accountDraft.maxTraffic" type="number" min="1" class="glass-input" placeholder="200">
+                    </div>
+                    <div v-if="accountDraft.siteType === 'aws'" class="modal-field-full">
+                        <p class="text-xs text-slate-500">填写 AWS IAM 用户的 Access Key ID 和 Secret Access Key。AWS 账号支持同步 Lightsail 实例、开关机、更换公网 IP 和被墙检测；流量按出入合计统计（Lightsail 的套餐流量两个方向都算），不支持创建实例和账单。</p>
                     </div>
                     <div class="modal-field-full schedule-card">
                         <div class="schedule-card__header">
@@ -6913,7 +6950,7 @@
                             v-model="ecsCreateDraft.accountGroupKey"
                             class="glass-select"
                             placeholder="请选择账号"
-                            :options="accountOptions"
+                            :options="ecsAccountOptions"
                         />
                         <p class="mt-2 text-xs text-slate-500">创建区域跟随账号配置，避免跨区域创建后无法归属到当前账号组。</p>
                     </div>
@@ -7494,6 +7531,27 @@
                     { id: 'cn-chengdu', name: '西南 1（成都）' }
                 ];
 
+                const awsRegions = [
+                    { id: 'ap-northeast-1', name: 'AWS 东京' },
+                    { id: 'ap-northeast-2', name: 'AWS 首尔' },
+                    { id: 'ap-southeast-1', name: 'AWS 新加坡' },
+                    { id: 'ap-southeast-2', name: 'AWS 悉尼' },
+                    { id: 'ap-southeast-3', name: 'AWS 雅加达' },
+                    { id: 'ap-south-1', name: 'AWS 孟买' },
+                    { id: 'us-east-1', name: 'AWS 弗吉尼亚' },
+                    { id: 'us-east-2', name: 'AWS 俄亥俄' },
+                    { id: 'us-west-2', name: 'AWS 俄勒冈' },
+                    { id: 'ca-central-1', name: 'AWS 蒙特利尔' },
+                    { id: 'eu-west-1', name: 'AWS 爱尔兰' },
+                    { id: 'eu-west-2', name: 'AWS 伦敦' },
+                    { id: 'eu-west-3', name: 'AWS 巴黎' },
+                    { id: 'eu-central-1', name: 'AWS 法兰克福' },
+                    { id: 'eu-north-1', name: 'AWS 斯德哥尔摩' }
+                ];
+                // Both clouds use IDs such as ap-northeast-1, so list each ID once.
+                const allRegions = [...aliyunRegions, ...awsRegions.filter((region) => !aliyunRegions.some((item) => item.id === region.id))];
+                const regionsForSite = (siteType) => siteType === 'aws' ? awsRegions : aliyunRegions;
+
                 const createDefaultAccount = () => ({
                     groupKey: '',
                     AccessKeyId: '',
@@ -7538,6 +7596,12 @@
                         domain: '',
                         pool_name: '',
                         credentials: {}
+                    },
+                    IpCheck: {
+                        probe_url: '',
+                        probe_token: '',
+                        port: 22,
+                        max_swaps: 5
                     },
                     Notification: {
                         email_enabled: true,
@@ -7622,6 +7686,9 @@
                 ));
                 const statusInstances = ref([]);
                 const allInstances = ref([]);
+                const ipCheckEnabled = ref(false);
+                const testingIpProbe = ref(false);
+                const ipProbeTestResult = ref(null);
                 const systemLogs = ref([]);
                 const initialized = ref(true);
 
@@ -7921,12 +7988,16 @@
                 let accountInterval = null;
                 const liveRefreshInterval = 5000;
 
-                const getRegionName = (regionId) => {
-                    const found = aliyunRegions.find((item) => item.id === regionId);
+                const getRegionName = (regionId, siteType = '') => {
+                    const found = regionsForSite(siteType).find((item) => item.id === regionId);
                     return found ? found.name : (regionId || '-');
                 };
 
-                const getSiteTypeLabel = (siteType) => siteType === 'international' ? '国际站' : '中国站';
+                const getSiteTypeLabel = (siteType) => ({ international: '国际站', aws: 'Lightsail' }[siteType] || '中国站');
+                const publicIpModeLabel = (inst) => {
+                    if (inst.siteType === 'aws') return inst.publicIpMode === 'eip' ? '静态 IP' : '动态 IP';
+                    return inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网';
+                };
                 const formatTrafficUsage = (value) => Number(value || 0).toFixed(2).replace(/\.00$/, '');
                 const {
                     itemLabels: billingItemLabels,
@@ -8138,7 +8209,7 @@
                         const labelBase = group.remark || maskAccessKey(group.AccessKeyId);
                         options.push({
                             value: key,
-                            label: `${labelBase} / ${getRegionName(group.regionId)}`
+                            label: `${labelBase} / ${getRegionName(group.regionId, group.siteType)}`
                         });
                     });
 
@@ -8203,6 +8274,7 @@
                     { key: 'protection', label: '流量保护', group: 'operations' },
                     { key: 'runtime', label: '运行与费用', group: 'operations' },
                     { key: 'ddns', label: '域名解析', group: 'operations' },
+                    { key: 'ipcheck', label: '被墙检测', group: 'operations' },
                     { key: 'notifications', label: '通知中心', group: 'operations' },
                     { key: 'appearance', label: '外观设置', group: 'maintenance' },
                     { key: 'security', label: '登录安全', group: 'maintenance' },
@@ -8212,6 +8284,14 @@
                     { key: 'operations', label: '实例与自动化', items: settingsItems.filter(item => item.group === 'operations') },
                     { key: 'maintenance', label: '控制台维护', items: settingsItems.filter(item => item.group === 'maintenance') }
                 ];
+
+                // Instances can only be created on Alibaba Cloud accounts.
+                const ecsAccountOptions = computed(() => {
+                    const awsKeys = new Set((config.value?.Accounts || [])
+                        .filter((group) => group.siteType === 'aws')
+                        .map((group) => group.groupKey || `${group.AccessKeyId}|${group.regionId}`));
+                    return accountOptions.value.filter((option) => !awsKeys.has(option.value));
+                });
 
                 const menuItems = computed(() => {
                     const items = [
@@ -8234,7 +8314,7 @@
                             {
                                 key: 'accounts',
                                 label: '账号管理',
-                                description: '阿里云账号与流量',
+                                description: '云账号与流量',
                                 icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
                             },
                             {
@@ -8301,6 +8381,12 @@
                         next.Ddns.credentials[provider.id] = buildDnsCredentials(provider, ddns.credentials?.[provider.id]);
                     }
                     delete next.DnsProviders;
+                    next.IpCheck = {
+                        probe_url: payload?.IpCheck?.probe_url || '',
+                        probe_token: payload?.IpCheck?.probe_token || '',
+                        port: Number(payload?.IpCheck?.port) || 22,
+                        max_swaps: Number(payload?.IpCheck?.max_swaps) || 5
+                    };
                     next.Accounts = Array.isArray(payload?.Accounts) ? payload.Accounts.map((item) => ({
                         ...createDefaultAccount(),
                         ...item
@@ -8323,6 +8409,7 @@
                         enable_billing: !!source.enable_billing,
                         AppBrand: source.AppBrand || {},
                         Ddns: source.Ddns || {},
+                        IpCheck: source.IpCheck || {},
                         Notification: source.Notification || {}
                     });
                 };
@@ -8358,6 +8445,7 @@
                             statusInstances.value = [];
                         } else {
                             statusInstances.value = json.data || [];
+                            ipCheckEnabled.value = !!json.ip_check_enabled;
                             statusSyncInterval.value = Number(json.sync_interval || statusSyncInterval.value || 600);
                             const now = Math.floor(Date.now() / 1000);
                             cronWarning.value = json.system_last_run ? (now - json.system_last_run) > 180 : statusInstances.value.length > 0;
@@ -8727,8 +8815,11 @@
                             allInstances.value = [];
                         } else {
                             allInstances.value = data.data || [];
+                            if (!sync) {
+                                ipCheckEnabled.value = !!data.ip_check_enabled;
+                            }
                             if (sync && !options.silent) {
-                                openAlert('实例已从阿里云同步完成', 'success');
+                                openAlert('实例已从云端同步完成', 'success');
                             }
                         }
                     } catch (error) {
@@ -8765,7 +8856,7 @@
                         } else {
                             allInstances.value = data.data || [];
                             statusInstances.value = data.data || [];
-                            openAlert('实例状态已与阿里云同步完成', 'success');
+                            openAlert('实例状态已与云端同步完成', 'success');
                             fetchStatusData(false);
                         }
                     } catch (error) {
@@ -8869,6 +8960,13 @@
                     }
                     return true;
                 };
+
+                // A region picked for one cloud does not exist on the other.
+                watch(() => accountDraft.value.siteType, (siteType) => {
+                    if (!regionsForSite(siteType).some((region) => region.id === accountDraft.value.regionId)) {
+                        accountDraft.value.regionId = '';
+                    }
+                });
 
                 const accountRegionKey = (account) => {
                     const accessKeyID = String(account?.AccessKeyId || '').trim();
@@ -9087,7 +9185,49 @@
                 };
 
                 const canReplaceIp = (inst) => {
-                    return isAdmin.value && inst && !inst.operationLocked && inst.instanceStatus !== 'Releasing' && inst.publicIpMode === 'eip';
+                    return isAdmin.value && inst && !inst.operationLocked && inst.instanceStatus !== 'Releasing' && (inst.publicIpMode === 'eip' || inst.siteType === 'aws');
+                };
+
+                const canCheckIp = (inst) => {
+                    return isAdmin.value && ipCheckEnabled.value && inst && !!inst.publicIp && !inst.operationLocked && inst.instanceStatus !== 'Releasing';
+                };
+
+                // The last mainland-China reachability result for the instance's current IP.
+                const ipCheckBadge = (inst) => {
+                    if (inst.ipReplacing) {
+                        return { text: '更换 IP 中', className: 'status-transition animate-pulse', title: '正在更换公网 IP，换好后会从国内检测' };
+                    }
+                    const check = inst.ipCheck;
+                    if (!check) return null;
+                    const time = check.checkedAt ? new Date(check.checkedAt * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+                    const title = [check.detail, time ? `检测时间 ${time}` : ''].filter(Boolean).join('\n');
+                    if (check.status === 'ok') return { text: '国内可达', className: 'status-running', title };
+                    if (check.status === 'blocked') return { text: '疑似被墙', className: 'status-error', title };
+                    return { text: '无法判断', className: 'status-unknown', title };
+                };
+
+                const checkInstanceIp = async (accountId) => {
+                    refreshingInstanceIds.value = [...new Set([...refreshingInstanceIds.value, accountId])];
+                    try {
+                        const res = await fetch('index.php?action=check_instance_ip', {
+                            method: 'POST',
+                            body: JSON.stringify({ accountId })
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.success) {
+                            openAlert(data.message || '检测失败', 'error');
+                            return;
+                        }
+                        const check = data.data || {};
+                        patchInstanceLists(accountId, { ipCheck: check });
+                        const label = { ok: '国内可达', blocked: '疑似被墙', unknown: '无法判断' }[check.status] || '无法判断';
+                        openAlert(`${check.ip || ''} ${label}：${check.detail || ''}`, check.status === 'ok' ? 'success' : 'error');
+                    } catch (error) {
+                        console.error('Check instance IP failed', error);
+                        openAlert('检测请求失败', 'error');
+                    } finally {
+                        refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(accountId));
+                    }
                 };
 
                 const controlInstance = async (accountId, action) => {
@@ -9122,7 +9262,17 @@
                 };
 
                 const replaceInstanceIp = async (accountId) => {
-                    const confirmed = await askConfirm('确定更换这台实例的公网 IP 吗？系统会先解绑并释放旧 EIP（不可恢复），再按旧 EIP 的带宽和线路申请按流量计费的新 EIP 并绑定到这台实例，期间实例会短暂没有公网 IP。DDNS 会自动同步到新 IP。', {
+                    const target = [...allInstances.value, ...statusInstances.value].find((item) => Number(item.id) === Number(accountId)) || {};
+                    let question = '确定更换这台实例的公网 IP 吗？系统会先解绑并释放旧 EIP（不可恢复），再按旧 EIP 的带宽和线路申请按流量计费的新 EIP 并绑定到这台实例，期间实例会短暂没有公网 IP。DDNS 会自动同步到新 IP。';
+                    if (target.siteType === 'aws') {
+                        question = target.publicIpMode === 'eip'
+                            ? '确定更换这台实例的公网 IP 吗？系统会先解绑并释放当前的静态 IP（不可恢复），再创建一个新的静态 IP 并绑定到这台实例，期间连接会短暂中断。DDNS 会自动同步到新 IP。'
+                            : '确定更换这台实例的公网 IP 吗？这台实例目前使用动态 IP，系统会创建一个静态 IP 并绑定到它，原来的动态 IP 会立即失效。DDNS 会自动同步到新 IP。';
+                    }
+                    if (ipCheckEnabled.value) {
+                        question += '换好后会从国内探测机检测新 IP，被墙会自动继续更换。';
+                    }
+                    const confirmed = await askConfirm(question, {
                         title: '更换公网 IP',
                         confirmLabel: '确认更换'
                     });
@@ -9139,6 +9289,13 @@
                             openAlert(data.message || '公网 IP 更换失败', 'error');
                             // A failure after the old EIP was released leaves the instance without a public IP.
                             await reloadInstanceViews({ silent: true });
+                            return;
+                        }
+                        if (data.queued) {
+                            // The swap and the reachability check continue in the background;
+                            // the list refreshes on its own and shows the result.
+                            patchInstanceLists(accountId, { ipReplacing: true });
+                            openAlert(data.message || '已开始更换公网 IP', 'success');
                             return;
                         }
 
@@ -9412,7 +9569,7 @@
                     const draft = { ...accountDraft.value };
                     accountTestContext.value = {
                         remark: draft.remark,
-                        region: aliyunRegions.find(region => region.id === draft.regionId)?.name || draft.regionId || '未选择区域',
+                        region: draft.regionId ? getRegionName(draft.regionId, draft.siteType) : '未选择区域',
                         site: getSiteTypeLabel(draft.siteType)
                     };
                     accountDraftTestResult.value = null;
@@ -9450,7 +9607,7 @@
 
                 const openCreateEcsModal = () => {
                     const draft = createDefaultEcsDraft();
-                    const firstAccount = config.value.Accounts?.[0];
+                    const firstAccount = (config.value.Accounts || []).find((account) => account.siteType !== 'aws');
                     if (firstAccount) {
                         draft.accountGroupKey = firstAccount.groupKey || `${firstAccount.AccessKeyId}|${firstAccount.regionId}`;
                         draft.regionId = firstAccount.regionId || '';
@@ -9775,6 +9932,24 @@
                         dnsTestResult.value = { success: false, message: '测试请求失败，请检查网络' };
                     } finally {
                         testingDns.value = false;
+                    }
+                };
+
+                const testIpProbe = async () => {
+                    testingIpProbe.value = true;
+                    ipProbeTestResult.value = null;
+                    try {
+                        const res = await fetch('index.php?action=test_ip_probe', {
+                            method: 'POST',
+                            body: JSON.stringify(config.value.IpCheck)
+                        });
+                        const data = await res.json();
+                        ipProbeTestResult.value = { success: !!data.success, message: data.message || (data.success ? '探测机连接正常' : '测试失败') };
+                    } catch (error) {
+                        console.error(error);
+                        ipProbeTestResult.value = { success: false, message: '测试请求失败，请检查网络' };
+                    } finally {
+                        testingIpProbe.value = false;
                     }
                 };
 
@@ -10382,6 +10557,16 @@
                     testingDns,
                     dnsTestResult,
                     testDnsProvider,
+                    testIpProbe,
+                    testingIpProbe,
+                    ipProbeTestResult,
+                    ipCheckBadge,
+                    canCheckIp,
+                    checkInstanceIp,
+                    publicIpModeLabel,
+                    allRegions,
+                    regionsForSite,
+                    ecsAccountOptions,
                     dnsCleanupTasks,
                     dnsCleanupLoading,
                     fetchDnsCleanupTasks,

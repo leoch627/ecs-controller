@@ -9,6 +9,8 @@
 - 查看实例状态、规格、公网 IP 和流量。
 - 查看每个账号本月已用流量（CDT，更换公网 IP 不会清零），支持流量超限告警或自动关机。
 - 创建、启动、停止和释放 ECS，以及一键更换实例绑定的弹性公网 IP（EIP）：先解绑并释放旧 EIP，再申请按流量计费、带宽和线路与旧 EIP 相同的新 EIP 并绑定。
+- 管理 AWS Lightsail 实例：同步、开关机、流量统计和一键更换公网 IP，详见 [AWS Lightsail](#aws-lightsail)。
+- 更换公网 IP 后从国内检测新 IP 是否被墙，被墙自动再换，详见[被墙检测](#被墙检测)。
 - 定时开关机、停机保活和每月自动开机。
 - Telegram、邮件、接口回调（Webhook）通知和每日流量摘要，支持 Telegram 远程控制。
 - 自动将公网 IP 同步到域名（DDNS），实例到期或释放后自动删除指向旧 IP 的解析；支持阿里云、腾讯云 DNSPod、华为云、Cloudflare、AWS Route 53、NameSilo、Porkbun、GoDaddy、DigitalOcean。
@@ -116,6 +118,109 @@ token 只用于首次初始化，不是管理员登录密码，也不能用于�
 - **检查失败**：可能是网络、服务未开通或账号信息问题，按提示处理后重试。
 
 测试不会实际开关机、创建或删除云资源。当前区域没有实例，或接口不支持安全预检时，部分操作权限会显示“未验证”。
+
+## AWS Lightsail
+
+在“账号管理 → 新增账号”里把“云平台 / 站点”选成 **AWS Lightsail**，填写 IAM 用户的 Access Key ID、Secret Access Key 和区域。一个账号对应一个区域，多个区域请分别添加。
+
+支持的功能：同步实例、开机、关机、释放、流量统计和流量保护、定时开关机、DDNS、更换公网 IP、被墙检测。不支持在面板里创建实例和查看账单。
+
+- **实例 ID** 就是 Lightsail 里的实例名称。
+- **流量**按出入两个方向合计，因为 Lightsail 套餐的流量额度两个方向都算；“账号可用流量”请按套餐额度填写。
+- **更换公网 IP** 通过静态 IP 完成：先解绑并释放实例当前的静态 IP，再创建一个新的静态 IP 绑定上去。实例还在用动态 IP 时，第一次更换会直接给它绑定一个静态 IP。绑定在实例上的静态 IP 不另外收费。
+
+建议给面板单独建一个 IAM 用户，只授予下面的权限：
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lightsail:GetRegions",
+        "lightsail:GetInstances",
+        "lightsail:GetInstance",
+        "lightsail:GetInstanceMetricData",
+        "lightsail:GetStaticIps",
+        "lightsail:GetStaticIp",
+        "lightsail:StartInstance",
+        "lightsail:StopInstance",
+        "lightsail:AllocateStaticIp",
+        "lightsail:AttachStaticIp",
+        "lightsail:DetachStaticIp",
+        "lightsail:ReleaseStaticIp"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+需要在面板里释放实例时，再加上 `lightsail:DeleteInstance`。“测试账号”只能验证读取权限，开关机和更换 IP 的权限无法预检。
+
+## 被墙检测
+
+更换公网 IP 后，面板让一台**国内机器**去连新 IP 的指定 TCP 端口，同时自己也连一次作对照：
+
+| 国内探测机 | 面板 | 结论 | 之后 |
+| --- | --- | --- | --- |
+| 连得上 | — | 国内可达 | 结束 |
+| 连不上 | 连得上 | 疑似被墙 | 自动再换，直到可达或达到次数上限 |
+| 连不上 | 连不上 | 无法判断（多半是实例没开机或端口没放行） | 停止，不再更换 |
+
+国内连不上时会隔几秒复测一次，两次都失败才算被墙。探测机不可用时同样按“无法判断”处理，不会白白消耗 IP。阿里云和 AWS 的实例都适用；实例卡片上的“检测”按钮可以随时检测当前 IP。
+
+### 部署探测程序
+
+探测程序 `gfw-probe` 是一个没有依赖的单文件程序，放在任意一台国内的 Linux 机器上运行。在能访问 GitHub 的电脑上编译后传过去：
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o gfw-probe ./cmd/gfw-probe
+```
+
+ARM 机器把 `GOARCH` 改成 `arm64`。在国内机器上运行：
+
+```bash
+PROBE_TOKEN=换成至少16位的随机密钥 PROBE_ADDR=:8433 ./gfw-probe
+```
+
+需要常驻时可以交给 systemd，例如 `/etc/systemd/system/gfw-probe.service`：
+
+```ini
+[Unit]
+Description=gfw-probe
+After=network-online.target
+
+[Service]
+Environment=PROBE_TOKEN=换成至少16位的随机密钥
+Environment=PROBE_ADDR=:8433
+ExecStart=/usr/local/bin/gfw-probe
+Restart=always
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+在国内机器的安全组里放行 TCP `8433`，建议只允许面板所在服务器的 IP 访问。
+
+### 在面板里启用
+
+进入“系统设置 → 被墙检测”，填写：
+
+- **国内探测机地址**：例如 `http://国内机器IP:8433`。留空即关闭检测。
+- **探测密钥**：和 `PROBE_TOKEN` 一致。
+- **检测端口**：实例上实际对外提供服务的 TCP 端口，并确认实例防火墙已放行。只被封了某个端口时，要检测那个端口才看得出来。
+- **被墙时最多更换次数**：默认 5，包含第一次更换。
+
+点“测试连接”确认后保存。之后点“更换 IP”会在后台执行，实例卡片显示“更换 IP 中”，结束后显示“国内可达”“疑似被墙”或“无法判断”，结果同时写入系统日志并发送通知。
+
+注意：
+
+- 请求用密钥签名而不是直接发送密钥，但内容本身不加密；探测程序只做 TCP 连接测试，并且拒绝内网地址。两台机器的时钟相差超过 5 分钟时签名校验会失败。
+- 检测的是 TCP 能否连通，不能发现针对协议特征的干扰。
+- 面板如果本身也部署在国内，被墙的 IP 面板同样连不上，结果会是“无法判断”，不会自动再换。
 
 ## 流量保护与自动化
 
