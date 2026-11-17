@@ -62,6 +62,13 @@ func (f *fakeCloudflare) client() *http.Client {
 			id := fmt.Sprintf("new-%d", f.created)
 			f.records[id] = record.Name + " " + record.Content
 			return reply(200, map[string]any{"id": id})
+		case r.Method == http.MethodPatch && strings.HasPrefix(path, "/zones/zone-1/dns_records/"):
+			id := strings.TrimPrefix(path, "/zones/zone-1/dns_records/")
+			var record struct{ Content string }
+			_ = json.NewDecoder(r.Body).Decode(&record)
+			name, _, _ := strings.Cut(f.records[id], " ")
+			f.records[id] = name + " " + record.Content
+			return reply(200, map[string]any{"id": id})
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/zones/zone-1/dns_records/"):
 			id := strings.TrimPrefix(path, "/zones/zone-1/dns_records/")
 			delete(f.records, id)

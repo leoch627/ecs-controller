@@ -341,3 +341,35 @@ func TestReplaceIPReleasesTheAddressTheCloudReportsAttached(t *testing.T) {
 	}
 	assertAccountNetwork(t, st, "ip-1", "198.51.100.2")
 }
+
+func TestReplaceIPSyncsDNSAfterEverySwap(t *testing.T) {
+	fake := &sequenceEIPClient{addresses: []string{"198.51.100.1", "198.51.100.2"}}
+	srv, st := newReplaceIPServer(t, lightsailAccount(), fake)
+	ipCheckFixture(t, st, 5, []string{"198.51.100.1"}, nil)
+	synced := make(chan string, 4)
+	srv.SyncDNS = func(_ context.Context, accountID int64) {
+		account, err := st.Account(accountID, false)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		synced <- account.PublicIP
+	}
+
+	if recorder := replaceIPFor(t, srv); recorder.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	waitForSwap(t, srv)
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case ip := <-synced:
+			seen[ip] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("DNS synced for %v, want both swaps", seen)
+		}
+	}
+	if !seen["198.51.100.2"] {
+		t.Fatalf("DNS never pointed at the final IP: %v", seen)
+	}
+}

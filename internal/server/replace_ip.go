@@ -231,11 +231,27 @@ func (s *Server) swapIP(client cloud.Client, a *app.Account, announce bool) (ipS
 		}
 	}
 	s.Store.AddLog("info", fmt.Sprintf("%s 公网 IP 已更换: %s -> %s", accountDisplay(*a), oldIP, ip))
+	// The old address is gone already, so point DNS at the new one now even if
+	// a later reachability check swaps again.
+	s.syncDNSAfterSwap(id)
 	if announce {
 		text := fmt.Sprintf("【ECS 控制台】公网 IP 已更换\n实例: %s\n旧 IP: %s\n新 IP: %s\n区域: %s", accountDisplay(*a), oldIP, ip, a.RegionID)
 		s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: text, Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
 	}
 	return ipSwap{OldIP: oldIP, NewIP: ip, AllocationID: alloc, Bandwidth: bandwidth}, nil
+}
+
+// syncDNSAfterSwap updates DNS in the background, so a slow DNS provider never
+// holds up the swap or its HTTP response.
+func (s *Server) syncDNSAfterSwap(accountID int64) {
+	if s.SyncDNS == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		s.SyncDNS(ctx, accountID)
+	}()
 }
 
 // replaceUntilReachable swaps the public IP, checks the new one from mainland
@@ -261,10 +277,6 @@ func (s *Server) replaceUntilReachable(id int64, cfg ipCheckSettings) {
 		}
 		lines = append(lines, "结果: "+outcome)
 		s.dispatchEvent(rctx(), notify.Event{Title: title, Summary: name + " " + outcome, AccountID: name, Text: strings.Join(lines, "\n"), Fields: map[string]string{"old_ip": firstIP, "new_ip": currentIP, "instance_id": instanceID}})
-		if currentIP != "" && s.Store.GetSetting("ddns_enabled", "0") == "1" {
-			// Have the monitor point DDNS at the final IP on its next pass.
-			_ = s.Store.SetSetting("last_ddns_reconcile", "0")
-		}
 	}
 	for attempt := 1; attempt <= cfg.MaxSwaps; attempt++ {
 		a, err := s.Store.Account(id, false)

@@ -45,6 +45,7 @@ func main() {
 	w := &worker.Worker{Store: st, Cloud: client, CloudFactory: func(group app.AccountGroup) cloud.Client {
 		return cloud.NewClient(group.AccessKeyID, group.AccessKeySecret, group.RegionID, group.SiteType)
 	}, Log: log.Default()}
+	srv.SyncDNS = w.SyncAccountDNS
 	go w.Run(ctx)
 	go w.Monitor(ctx, time.Duration(numberEnv("ECS_MONITOR_INTERVAL", 60))*time.Second)
 	go w.TelegramControl(ctx)

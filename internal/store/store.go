@@ -208,6 +208,7 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS passkey_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, credential_id TEXT UNIQUE NOT NULL, credential_data TEXT NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS passkey_challenges (id TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT DEFAULT '', session_data TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS instance_expiry (instance_id TEXT PRIMARY KEY, charge_type TEXT DEFAULT '', expired_at INTEGER DEFAULT 0, queued_at INTEGER DEFAULT 0, updated_at INTEGER DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS dns_names (instance_key TEXT PRIMARY KEY, name TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS ip_checks (account_id INTEGER PRIMARY KEY, ip TEXT DEFAULT '', status TEXT DEFAULT '', detail TEXT DEFAULT '', checked_at INTEGER DEFAULT 0)`,
 	}
 	for _, statement := range statements {

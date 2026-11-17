@@ -49,6 +49,9 @@ type Server struct {
 	githubAPIBase string
 	// DNSClient is the HTTP client for DNS provider APIs; nil uses a default.
 	DNSClient *http.Client
+	// SyncDNS points an instance's DNS records at its current public IP; nil
+	// leaves that to the monitor.
+	SyncDNS func(ctx context.Context, accountID int64)
 }
 
 func New(st *store.Store, dataDir, templatePath, setupToken string, client cloud.Client) *Server {
@@ -371,6 +374,8 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 		s.replaceIP(w, data)
 	case "check_instance_ip":
 		s.checkInstanceIP(w, data)
+	case "set_instance_dns_name":
+		s.setInstanceDNSName(w, data)
 	case "test_ip_probe":
 		s.testIPProbe(w, data)
 	case "refresh_account", "sync_account_group", "restore_schedule_block":
@@ -741,6 +746,7 @@ func (s *Server) status(w http.ResponseWriter) {
 	accounts, _ := s.Store.LoadAccounts(false)
 	expiries := s.Store.ExpiryByInstance()
 	ipChecks := s.Store.IPChecks()
+	ddnsActive := dns.LoadSettings(s.Store.GetSetting, s.Store.OpenSecret).DDNSActive()
 	data := make([]map[string]any, 0)
 	for _, a := range accounts {
 		if a.InstanceID == "" {
@@ -757,13 +763,17 @@ func (s *Server) status(w http.ResponseWriter) {
 		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95)), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
 		item := data[len(data)-1]
 		item["siteType"] = a.SiteType
+		if ddnsActive {
+			item["dnsName"] = s.Store.DDNSRecordName(a, accounts)
+			item["dnsCustom"] = s.Store.CustomDNSName(a) != ""
+		}
 		_, item["ipReplacing"] = s.ipReplacing.Load(a.ID)
 		// A result for an earlier IP says nothing about the current one.
 		if check, ok := ipChecks[a.ID]; ok && check.IP != "" && check.IP == a.PublicIP {
 			item["ipCheck"] = map[string]any{"ip": check.IP, "status": check.Status, "detail": check.Detail, "checkedAt": check.CheckedAt}
 		}
 	}
-	s.json(w, 200, map[string]any{"data": data, "ip_check_enabled": s.ipCheckSettings().enabled(), "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
+	s.json(w, 200, map[string]any{"data": data, "ip_check_enabled": s.ipCheckSettings().enabled(), "ddns_active": ddnsActive, "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
 }
 
 func (s *Server) saveConfig(data map[string]any) error {
@@ -939,7 +949,7 @@ func validateAccountRegionUniqueness(raw []any) error {
 }
 
 func ddnsPayloadAccount(account app.Account) map[string]any {
-	return map[string]any{"GroupKey": account.GroupKey, "AccessKeyID": account.AccessKeyID, "RegionID": account.RegionID, "InstanceID": account.InstanceID, "Remark": account.Remark, "InstanceName": account.InstanceName}
+	return map[string]any{"GroupKey": account.GroupKey, "AccessKeyID": account.AccessKeyID, "RegionID": account.RegionID, "InstanceID": account.InstanceID, "Remark": account.Remark, "InstanceName": account.InstanceName, "SiteType": account.SiteType}
 }
 
 func ddnsPayloadAccounts(accounts []app.Account) []map[string]any {
@@ -1894,7 +1904,7 @@ func (s *Server) csrfOK(w http.ResponseWriter, r *http.Request) bool {
 }
 func (s *Server) mutating(a string) bool {
 	switch a {
-	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "check_instance_ip", "test_ip_probe", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup", "test_dns", "retry_dns_cleanup":
+	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "check_instance_ip", "test_ip_probe", "set_instance_dns_name", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup", "test_dns", "retry_dns_cleanup":
 		return true
 	}
 	return false

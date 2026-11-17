@@ -2,10 +2,7 @@ package worker
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,8 +13,6 @@ import (
 	"github.com/Kori1c/ecs-controller/internal/store"
 )
 
-var ddnsSlugPattern = regexp.MustCompile(`[^a-z0-9]+`)
-
 func (w *Worker) dnsSettings() dns.Settings {
 	return dns.LoadSettings(w.Store.GetSetting, w.Store.OpenSecret)
 }
@@ -26,40 +21,63 @@ func (w *Worker) dnsService(settings dns.Settings) (*dns.Service, error) {
 	return dns.NewService(settings, w.DNSClient)
 }
 
-func (w *Worker) syncDDNSAccount(ctx context.Context, account app.Account) {
+// syncDDNSAccount points the account's DDNS name at its public IP. It
+// returns false only when the provider call failed, so the caller can retry.
+func (w *Worker) syncDDNSAccount(ctx context.Context, account app.Account) bool {
 	settings := w.dnsSettings()
 	if !settings.DDNSActive() || account.InstanceID == "" || account.CloudPresence == "missing" {
-		return
+		return true
 	}
 	// An expired instance's IP is being removed from DNS; writing it back
 	// here would undo the cleanup.
 	if w.Store.InstanceExpiry(account.InstanceID).Expired(time.Now()) {
-		return
+		return true
 	}
 	address := store.AccountPublicIP(account)
 	if address == "" {
-		return
+		return true
 	}
 	service, err := w.dnsService(settings)
 	if err != nil {
 		w.Store.AddLog("warning", "DDNS 同步失败: "+err.Error())
-		return
+		return false
 	}
 	accounts, _ := w.Store.LoadAccounts(false)
 	name := w.ddnsRecordName(account, accounts)
 	action, err := service.SyncA(ctx, name, address)
 	if err != nil {
 		w.Store.AddLog("warning", service.Label()+" DDNS 同步失败: "+err.Error())
-		return
+		return false
 	}
 	if action != "unchanged" {
 		w.Store.AddLog("info", fmt.Sprintf("DDNS 已同步 [%s] %s -> %s", accountLabel(account), name, address))
 	}
+	return true
 }
 
+// SyncAccountDNS updates the instance's DDNS record and the round-robin name
+// right after its public IP changed, instead of waiting for the monitor. A
+// failed DDNS update is retried on the monitor's next pass.
+func (w *Worker) SyncAccountDNS(ctx context.Context, accountID int64) {
+	account, err := w.Store.Account(accountID, false)
+	if err != nil {
+		return
+	}
+	if !w.syncDDNSAccount(ctx, *account) {
+		_ = w.Store.SetSetting("last_ddns_reconcile", "0")
+	}
+	w.syncDDNSPool(ctx, time.Now())
+}
+
+// deleteDDNSAccount removes the record of an instance that is gone, then
+// forgets the name chosen for it.
 func (w *Worker) deleteDDNSAccount(ctx context.Context, account app.Account, before []app.Account) error {
+	if account.InstanceID == "" {
+		return nil
+	}
 	settings := w.dnsSettings()
-	if !settings.DDNSActive() || account.InstanceID == "" {
+	if !settings.DDNSActive() {
+		_ = w.Store.DeleteCustomDNSName(account)
 		return nil
 	}
 	service, err := w.dnsService(settings)
@@ -75,11 +93,12 @@ func (w *Worker) deleteDDNSAccount(ctx context.Context, account app.Account, bef
 	if deleted {
 		w.Store.AddLog("info", "DDNS 已删除: "+name)
 	}
+	_ = w.Store.DeleteCustomDNSName(account)
 	return nil
 }
 
 func ddnsPayloadAccount(account app.Account) map[string]any {
-	return map[string]any{"GroupKey": account.GroupKey, "AccessKeyID": account.AccessKeyID, "RegionID": account.RegionID, "InstanceID": account.InstanceID, "Remark": account.Remark, "InstanceName": account.InstanceName}
+	return map[string]any{"GroupKey": account.GroupKey, "AccessKeyID": account.AccessKeyID, "RegionID": account.RegionID, "InstanceID": account.InstanceID, "Remark": account.Remark, "InstanceName": account.InstanceName, "SiteType": account.SiteType}
 }
 
 func ddnsPayloadAccounts(accounts []app.Account) []map[string]any {
@@ -157,74 +176,5 @@ func (w *Worker) ddnsEnabled() bool {
 }
 
 func (w *Worker) ddnsRecordName(account app.Account, accounts []app.Account) string {
-	domain := normalizeDDNSDomain(w.Store.GetSetting("ddns_domain", ""))
-	groupKey := account.GroupKey
-	if groupKey == "" {
-		groupKey = account.AccessKeyID + "|" + account.RegionID
-	}
-	count := 0
-	for _, item := range accounts {
-		key := item.GroupKey
-		if key == "" {
-			key = item.AccessKeyID + "|" + item.RegionID
-		}
-		if key == groupKey && item.InstanceID != "" && item.CloudPresence != "missing" {
-			count++
-		}
-	}
-	base := ""
-	if groups, err := w.Store.LoadGroups(); err == nil {
-		for _, group := range groups {
-			if group.GroupKey == groupKey {
-				base = group.Remark
-				break
-			}
-		}
-	}
-	if base == "" {
-		base = account.Remark
-	}
-	if base == "" {
-		base = account.InstanceName
-	}
-	if base == "" {
-		base = strings.TrimPrefix(account.InstanceID, "i-")
-	}
-	base = slugDDNS(base)
-	if base == "" {
-		base = shortHash(account.InstanceID)
-	}
-	if count > 1 {
-		suffix := slugDDNS(account.InstanceName)
-		if suffix == "" {
-			suffix = slugDDNS(strings.TrimPrefix(account.InstanceID, "i-"))
-		}
-		if suffix != "" && suffix != base {
-			base += "-" + suffix
-		}
-	}
-	if domain == "" {
-		return base
-	}
-	return base + "." + domain
-}
-
-func normalizeDDNSDomain(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.TrimPrefix(strings.TrimPrefix(value, "https://"), "http://")
-	if index := strings.IndexByte(value, '/'); index >= 0 {
-		value = value[:index]
-	}
-	return strings.Trim(value, ".")
-}
-
-func slugDDNS(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = ddnsSlugPattern.ReplaceAllString(value, "-")
-	return strings.Trim(strings.TrimSpace(value), "-")
-}
-
-func shortHash(value string) string {
-	hash := sha1.Sum([]byte(value))
-	return hex.EncodeToString(hash[:])[:8]
+	return w.Store.DDNSRecordName(account, accounts)
 }

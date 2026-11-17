@@ -274,7 +274,7 @@ func ddnsPayloadAccount(account app.Account) map[string]any {
 	return map[string]any{
 		"GroupKey": account.GroupKey, "AccessKeyID": account.AccessKeyID,
 		"RegionID": account.RegionID, "InstanceID": account.InstanceID,
-		"Remark": account.Remark, "InstanceName": account.InstanceName,
+		"Remark": account.Remark, "InstanceName": account.InstanceName, "SiteType": account.SiteType,
 	}
 }
 

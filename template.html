@@ -664,6 +664,39 @@
             animation: soft-fade-in .15s ease both;
         }
 
+        .dns-name-line {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+            min-width: 0;
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .dns-name-line > span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .dns-name-edit {
+            flex-shrink: 0;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: inherit;
+            font-size: 11px;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            cursor: pointer;
+        }
+
+        .dns-name-edit:disabled {
+            cursor: default;
+            opacity: 0.5;
+        }
+
         .dialog-card {
             width: min(520px, 100%);
             border-radius: 16px;
@@ -5753,6 +5786,10 @@
                                     <div class="summary-cell">
                                         <div class="summary-primary font-mono text-sm">{{ inst.publicIp || inst.privateIp || '-' }}</div>
                                         <div class="summary-secondary">{{ publicIpModeLabel(inst) }}</div>
+                                        <div v-if="inst.dnsName" class="dns-name-line">
+                                            <span class="font-mono" :title="inst.dnsCustom ? '自定义解析名称' : '自动生成的解析名称'">{{ inst.dnsName }}</span>
+                                            <button type="button" class="dns-name-edit" @click="editInstanceDnsName(inst)" :disabled="isRefreshingInstance(inst.id)">改名</button>
+                                        </div>
                                         <span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span>
                                     </div>
                                     <div class="summary-cell center-column">
@@ -5807,7 +5844,7 @@
                                 <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
                                     <div><span class="text-[var(--muted)]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
                                     <div><span class="text-[var(--muted)]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
-                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ publicIpModeLabel(inst) }}</p><span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span></div>
+                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ publicIpModeLabel(inst) }}</p><div v-if="inst.dnsName" class="dns-name-line"><span class="font-mono">{{ inst.dnsName }}</span><button type="button" class="dns-name-edit" @click="editInstanceDnsName(inst)" :disabled="isRefreshingInstance(inst.id)">改名</button></div><span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span></div>
                                     <div>
                                         <span class="text-[var(--muted)]">公网带宽峰值</span>
                                         <p class="mt-1 text-sm font-semibold">{{ formatPublicBandwidth(inst) }}</p>
@@ -6210,7 +6247,7 @@
                                         </label>
                                         <p v-if="config.Ddns.cleanup_enabled && !config.Ddns.domain" class="settings-warning">没有填写根域名，清理会检查这个服务商账号下的全部域名。</p>
                                         <label class="settings-toggle">
-                                            <span><span>自动把实例 IP 写入解析（DDNS）</span><span class="settings-hint">创建实例、开机和同步时更新 A 记录。单台机器用「账号备注.根域名」，同账号多台用「账号备注-实例名.根域名」。</span></span>
+                                            <span><span>自动把实例 IP 写入解析（DDNS）</span><span class="settings-hint">创建实例、开机、同步和更换 IP 时更新 A 记录。阿里云单台机器用「账号备注.根域名」，同账号多台用「账号备注-实例名.根域名」；AWS 每台机器固定用「账号备注-实例名.根域名」。在实例管理里可以给每台机器单独改名。</span></span>
                                             <span class="switch-control"><input type="checkbox" v-model="config.Ddns.enabled"><span class="switch-slider"></span></span>
                                         </label>
                                         <p v-if="config.Ddns.enabled && !config.Ddns.domain" class="settings-warning">DDNS 需要填写根域名才会生效。</p>
@@ -6602,11 +6639,12 @@
 
         <div v-if="dialogState.open" class="dialog-overlay">
             <div class="glass-panel dialog-card">
-                <p class="subtle-label">{{ dialogState.mode === 'confirm' ? '操作确认' : '系统提示' }}</p>
+                <p class="subtle-label">{{ dialogState.mode === 'alert' ? '系统提示' : '操作确认' }}</p>
                 <h2 class="mt-2 text-2xl font-black">{{ dialogState.title }}</h2>
                 <p class="mt-4 text-sm leading-7 text-[#475569]">{{ dialogState.message }}</p>
+                <input v-if="dialogState.mode === 'prompt'" v-model.trim="dialogState.value" class="glass-input mt-4" :placeholder="dialogState.placeholder" autocomplete="off" spellcheck="false" @keyup.enter="resolveDialog(true)">
                 <div class="dialog-actions">
-                    <button v-if="dialogState.mode === 'confirm'" @click="resolveDialog(false)" class="ghost-button">
+                    <button v-if="dialogState.mode === 'confirm' || dialogState.mode === 'prompt'" @click="resolveDialog(false)" class="ghost-button">
                         {{ dialogState.cancelLabel }}
                     </button>
                     <button @click="resolveDialog(true)" class="solid-button">
@@ -7687,6 +7725,7 @@
                 const statusInstances = ref([]);
                 const allInstances = ref([]);
                 const ipCheckEnabled = ref(false);
+                const ddnsActive = ref(false);
                 const testingIpProbe = ref(false);
                 const ipProbeTestResult = ref(null);
                 const systemLogs = ref([]);
@@ -8155,8 +8194,23 @@
                         resolve
                     };
                 });
+                // Resolves to the typed text, or null when cancelled.
+                const askPrompt = (message, options = {}) => new Promise((resolve) => {
+                    dialogState.value = {
+                        open: true,
+                        mode: 'prompt',
+                        title: options.title || '请输入',
+                        message,
+                        value: options.value || '',
+                        placeholder: options.placeholder || '',
+                        confirmLabel: options.confirmLabel || '保存',
+                        cancelLabel: options.cancelLabel || '取消',
+                        resolve: (confirmed, typed) => resolve(confirmed ? (typed || '') : null)
+                    };
+                });
                 const resolveDialog = (confirmed) => {
                     const resolver = dialogState.value.resolve;
+                    const typed = dialogState.value.value;
                     dialogState.value = {
                         open: false,
                         mode: 'alert',
@@ -8167,7 +8221,7 @@
                         resolve: null
                     };
                     if (typeof resolver === 'function') {
-                        resolver(confirmed);
+                        resolver(confirmed, typed);
                     }
                 };
                 const getAccountSyncResult = (index) => {
@@ -8446,6 +8500,7 @@
                         } else {
                             statusInstances.value = json.data || [];
                             ipCheckEnabled.value = !!json.ip_check_enabled;
+                            ddnsActive.value = !!json.ddns_active;
                             statusSyncInterval.value = Number(json.sync_interval || statusSyncInterval.value || 600);
                             const now = Math.floor(Date.now() / 1000);
                             cronWarning.value = json.system_last_run ? (now - json.system_last_run) > 180 : statusInstances.value.length > 0;
@@ -8817,6 +8872,7 @@
                             allInstances.value = data.data || [];
                             if (!sync) {
                                 ipCheckEnabled.value = !!data.ip_check_enabled;
+                                ddnsActive.value = !!data.ddns_active;
                             }
                             if (sync && !options.silent) {
                                 openAlert('实例已从云端同步完成', 'success');
@@ -9204,6 +9260,35 @@
                     if (check.status === 'ok') return { text: '国内可达', className: 'status-running', title };
                     if (check.status === 'blocked') return { text: '疑似被墙', className: 'status-error', title };
                     return { text: '无法判断', className: 'status-unknown', title };
+                };
+
+                const editInstanceDnsName = async (inst) => {
+                    const current = inst.dnsCustom ? inst.dnsName : '';
+                    const name = await askPrompt(`当前解析名称：${inst.dnsName}。填写新的名称（例如 jp1，会解析为 jp1.根域名），留空恢复自动生成的名称。改名会先写入新记录，再删除旧记录。`, {
+                        title: '修改解析名称',
+                        value: current,
+                        placeholder: '留空使用自动名称'
+                    });
+                    if (name === null || name === current) return;
+                    refreshingInstanceIds.value = [...new Set([...refreshingInstanceIds.value, inst.id])];
+                    try {
+                        const res = await fetch('index.php?action=set_instance_dns_name', {
+                            method: 'POST',
+                            body: JSON.stringify({ accountId: inst.id, name })
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.success) {
+                            openAlert(data.message || '修改解析名称失败', 'error');
+                            return;
+                        }
+                        patchInstanceLists(inst.id, { dnsName: data.data?.dnsName || inst.dnsName, dnsCustom: !!data.data?.dnsCustom });
+                        openAlert(data.message || '解析名称已修改', 'success');
+                    } catch (error) {
+                        console.error('Set DNS name failed', error);
+                        openAlert('修改解析名称请求失败', 'error');
+                    } finally {
+                        refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(inst.id));
+                    }
                 };
 
                 const checkInstanceIp = async (accountId) => {
@@ -10563,6 +10648,8 @@
                     ipCheckBadge,
                     canCheckIp,
                     checkInstanceIp,
+                    editInstanceDnsName,
+                    ddnsActive,
                     publicIpModeLabel,
                     allRegions,
                     regionsForSite,
