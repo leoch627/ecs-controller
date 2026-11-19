@@ -114,7 +114,9 @@ func (d *dnspod) CreateA(ctx context.Context, zone Zone, name, ip string) error 
 	if err != nil {
 		return err
 	}
-	return d.call(ctx, "CreateRecord", map[string]any{"Domain": zone.Name, "SubDomain": host, "RecordType": "A", "RecordLine": "默认", "Value": ip, "TTL": 600}, nil, "")
+	return withShortestTTL("dnspod", zone.Name, ttlDNSPod, func(ttl int) error {
+		return d.call(ctx, "CreateRecord", map[string]any{"Domain": zone.Name, "SubDomain": host, "RecordType": "A", "RecordLine": "默认", "Value": ip, "TTL": ttl}, nil, "")
+	})
 }
 
 func (d *dnspod) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
@@ -123,11 +125,13 @@ func (d *dnspod) UpdateA(ctx context.Context, zone Zone, record Record, values [
 	if line == "" {
 		line = "默认"
 	}
-	params := map[string]any{"Domain": zone.Name, "RecordId": id, "SubDomain": record.Raw["host"], "RecordType": "A", "RecordLine": line, "Value": values[0], "TTL": record.TTL}
-	if lineID, _ := record.Raw["line_id"].(string); lineID != "" {
-		params["RecordLineId"] = lineID
-	}
-	return d.call(ctx, "ModifyRecord", params, nil, "")
+	return withShortestTTL("dnspod", zone.Name, ttlDNSPod, func(ttl int) error {
+		params := map[string]any{"Domain": zone.Name, "RecordId": id, "SubDomain": record.Raw["host"], "RecordType": "A", "RecordLine": line, "Value": values[0], "TTL": ttl}
+		if lineID, _ := record.Raw["line_id"].(string); lineID != "" {
+			params["RecordLineId"] = lineID
+		}
+		return d.call(ctx, "ModifyRecord", params, nil, "")
+	})
 }
 
 func (d *dnspod) DeleteA(ctx context.Context, zone Zone, record Record) error {

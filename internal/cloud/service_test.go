@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -69,6 +70,27 @@ func TestServicePreflightAndEIPRequestSemantics(t *testing.T) {
 	allocationID, ip, err := service.AllocateEIPWithBandwidth(context.Background(), "cn-test", 20)
 	if err != nil || allocationID != "eip-1" || ip != "203.0.113.10" {
 		t.Fatalf("allocate EIP result: %q %q %v", allocationID, ip, err)
+	}
+}
+
+func TestRunInstancesUsesPL0ForSmallESSD(t *testing.T) {
+	var got []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		got = append(got, q.Get("SystemDisk.Size")+"/"+q.Get("SystemDisk.Category")+"/"+q.Get("SystemDisk.PerformanceLevel"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"InstanceId":"i-1"}`))
+	}))
+	defer server.Close()
+	client := &RPCClient{HTTPClient: server.Client(), Endpoint: server.URL, Version: "2014-05-26", Product: "Ecs", AccessKey: "ak", Secret: "sk"}
+	service := &Service{ECS: client}
+	for _, req := range []RunRequest{{DiskSize: 1, DiskCategory: "cloud_essd"}, {DiskSize: 40, DiskCategory: "cloud_essd"}, {DiskSize: 1, DiskCategory: "cloud_auto"}} {
+		if _, err := service.RunInstances(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := "1/cloud_essd/PL0,40/cloud_essd/,1/cloud_auto/"; strings.Join(got, ",") != want {
+		t.Fatalf("disk parameters %v, want %s", got, want)
 	}
 }
 
@@ -543,5 +565,36 @@ func TestAssociateEIPBindsToECSInstance(t *testing.T) {
 	// Alibaba Cloud rejects "Ecs" with InvalidParameter.InstanceTypeNotSupport.
 	if associate.Get("Action") != "AssociateEipAddress" || associate.Get("InstanceType") != "EcsInstance" || associate.Get("InstanceId") != "i-1" {
 		t.Fatalf("AssociateEipAddress params=%v", associate)
+	}
+}
+
+func TestPrepareNetworkOpensAllIPv4Ports(t *testing.T) {
+	var rule url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		var response any = map[string]any{}
+		switch q.Get("Action") {
+		case "CreateVpc":
+			response = map[string]any{"VpcId": "vpc-1"}
+		case "DescribeVpcs":
+			response = map[string]any{"Vpcs": map[string]any{"Vpc": []any{map[string]any{"VpcId": "vpc-1", "Status": "Available"}}}}
+		case "CreateVSwitch":
+			response = map[string]any{"VSwitchId": "vsw-1"}
+		case "CreateSecurityGroup":
+			response = map[string]any{"SecurityGroupId": "sg-1"}
+		case "AuthorizeSecurityGroup":
+			rule = q
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+	client := &RPCClient{HTTPClient: server.Client(), Endpoint: server.URL, Version: "2014-05-26", Product: "Ecs", AccessKey: "ak", Secret: "sk"}
+	service := &Service{ECS: client, VPC: client}
+	if _, _, sg, err := service.PrepareNetworkForPort(context.Background(), "cn-test", "192.168.0.0/16", "zone-a", "192.0.2.10/32", 22); err != nil || sg != "sg-1" {
+		t.Fatalf("prepare network: sg=%q err=%v", sg, err)
+	}
+	if rule.Get("IpProtocol") != "all" || rule.Get("PortRange") != "-1/-1" || rule.Get("SourceCidrIp") != "0.0.0.0/0" {
+		t.Fatalf("unexpected security group rule: %v", rule)
 	}
 }

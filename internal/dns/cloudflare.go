@@ -89,17 +89,30 @@ func (c *cloudflare) Matches(record Record, ip string) bool {
 }
 
 func (c *cloudflare) CreateA(ctx context.Context, zone Zone, name, ip string) error {
-	_, err := c.api(ctx, http.MethodPost, "/zones/"+url.PathEscape(zone.ID)+"/dns_records", map[string]any{
-		"type": "A", "name": normalizeName(name), "content": ip, "ttl": 1, "proxied": c.proxied(), "comment": "Managed by ECS 控制台",
+	return c.withTTL(zone, func(ttl int) error {
+		_, err := c.api(ctx, http.MethodPost, "/zones/"+url.PathEscape(zone.ID)+"/dns_records", map[string]any{
+			"type": "A", "name": normalizeName(name), "content": ip, "ttl": ttl, "proxied": c.proxied(), "comment": "Managed by ECS 控制台",
+		})
+		return err
 	})
-	return err
 }
 
 func (c *cloudflare) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
-	_, err := c.api(ctx, http.MethodPatch, "/zones/"+url.PathEscape(zone.ID)+"/dns_records/"+url.PathEscape(record.ID), map[string]any{
-		"content": values[0], "proxied": c.proxied(),
+	return c.withTTL(zone, func(ttl int) error {
+		_, err := c.api(ctx, http.MethodPatch, "/zones/"+url.PathEscape(zone.ID)+"/dns_records/"+url.PathEscape(record.ID), map[string]any{
+			"content": values[0], "ttl": ttl, "proxied": c.proxied(),
+		})
+		return err
 	})
-	return err
+}
+
+// withTTL uses the shortest TTL for DNS-only records. Proxied records always
+// answer with Cloudflare's own addresses and only accept 1 (automatic).
+func (c *cloudflare) withTTL(zone Zone, write func(ttl int) error) error {
+	if c.proxied() {
+		return write(1)
+	}
+	return withShortestTTL("cloudflare", zone.ID, ttlCloudflare, write)
 }
 
 func (c *cloudflare) DeleteA(ctx context.Context, zone Zone, record Record) error {

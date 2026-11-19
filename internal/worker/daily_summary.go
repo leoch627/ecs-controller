@@ -97,18 +97,11 @@ func (w *Worker) dailyTrafficEvent(ctx context.Context, reportDay time.Time) (no
 	if !complete {
 		status = "不完整"
 	}
-	text := strings.Join([]string{
-		fmt.Sprintf("每日流量摘要（%s）", reportDay.Format("2006-01-02")),
-		"",
-		"账号流量已使用：",
-		strings.Join(cdtLines, "\n"),
-		"",
-		"数据状态：" + status,
-	}, "\n")
 	return notify.Event{
 		Title:   "每日流量摘要",
 		Summary: fmt.Sprintf("每日流量摘要（%s）", reportDay.Format("2006-01-02")),
-		Text:    text,
+		Lines:   []notify.Line{notify.L("日期", reportDay.Format("2006-01-02")), notify.L("数据状态", status)},
+		Body:    "账号流量已使用：\n" + strings.Join(cdtLines, "\n"),
 		Fields: map[string]string{
 			"report_date": reportDay.Format("2006-01-02"),
 			"data_status": status,

@@ -40,11 +40,15 @@ type EventConfig struct {
 	WebhookBody    string
 }
 
+// Event is one notification. Its message is rendered by Text so every
+// channel and every event shares one layout; see format.go.
 type Event struct {
 	Title     string
 	Summary   string
-	Text      string
 	AccountID string
+	Lines     []Line
+	Body      string
+	Time      time.Time
 	Fields    map[string]string
 }
 
@@ -102,13 +106,16 @@ func settingBool(value string, defaultValue bool) bool {
 }
 
 func (d Dispatcher) Dispatch(ctx context.Context, event Event) error {
+	if event.Time.IsZero() {
+		event.Time = time.Now()
+	}
+	text := event.Text()
 	var errs []string
 	attempts := 0
 	succeeded := 0
 	if d.Config.EmailEnabled && d.Config.Email != "" && d.Config.SMTPHost != "" {
 		attempts++
-		body := event.Text
-		if err := Email(ctx, d.Config.SMTPHost, d.Config.SMTPPort, d.Config.SMTPUser, d.Config.SMTPPassword, d.Config.SMTPUser, d.Config.Email, "ECS 控制台通知 - "+event.Title, body, d.Config.SMTPSecure); err != nil {
+		if err := Email(ctx, d.Config.SMTPHost, d.Config.SMTPPort, d.Config.SMTPUser, d.Config.SMTPPassword, d.Config.SMTPUser, d.Config.Email, Heading(event.Title), text, d.Config.SMTPSecure); err != nil {
 			errs = append(errs, "邮件通知: "+err.Error())
 		} else {
 			succeeded++
@@ -118,7 +125,7 @@ func (d Dispatcher) Dispatch(ctx context.Context, event Event) error {
 		attempts++
 		client, err := NewTelegramClient(d.Config.TelegramToken, d.Config.TelegramProxy, d.Config.TelegramURL, d.Config.TelegramIP, d.Config.TelegramPort, d.Config.TelegramUser, d.Config.TelegramPass)
 		if err == nil {
-			err = client.SendMessage(ctx, d.Config.TelegramChatID, event.Text, nil)
+			err = client.SendMessage(ctx, d.Config.TelegramChatID, text, nil)
 		}
 		if err != nil {
 			errs = append(errs, "Telegram: "+err.Error())
@@ -144,12 +151,19 @@ func (d Dispatcher) Dispatch(ctx context.Context, event Event) error {
 }
 
 func WebhookEvent(ctx context.Context, cfg EventConfig, event Event) error {
+	if strings.TrimSpace(cfg.WebhookURL) == "" {
+		return fmt.Errorf("webhook URL 不能为空")
+	}
 	method := methodOrDefault(cfg.WebhookMethod)
 	typeName := strings.ToUpper(strings.TrimSpace(cfg.WebhookType))
 	if typeName == "" {
 		typeName = "JSON"
 	}
-	vars := map[string]string{"#TITLE#": event.Title, "#MSG#": event.Summary, "#ACCOUNT#": event.AccountID, "#TRAFFIC#": event.Fields["traffic"], "#MAX_TRAFFIC#": event.Fields["max_traffic"]}
+	if event.Time.IsZero() {
+		event.Time = time.Now()
+	}
+	text := event.Text()
+	vars := map[string]string{"#TITLE#": event.Title, "#MSG#": event.Summary, "#TEXT#": text, "#TIME#": event.Time.Format(timeLayout), "#ACCOUNT#": event.AccountID, "#TRAFFIC#": event.Fields["traffic"], "#MAX_TRAFFIC#": event.Fields["max_traffic"]}
 	for key, value := range event.Fields {
 		vars["#"+strings.ToUpper(key)+"#"] = value
 	}
@@ -188,8 +202,8 @@ func WebhookEvent(ctx context.Context, cfg EventConfig, event Event) error {
 			}
 			values := parsed.Query()
 			values.Set("title", event.Title)
-			values.Set("text", event.Text)
-			values.Set("time", time.Now().Format(time.RFC3339))
+			values.Set("text", text)
+			values.Set("time", event.Time.Format(time.RFC3339))
 			parsed.RawQuery = values.Encode()
 			endpoint = parsed.String()
 		}
@@ -209,9 +223,9 @@ func WebhookEvent(ctx context.Context, cfg EventConfig, event Event) error {
 			body = []byte(bodyText)
 		}
 	} else if typeName == "FORM" {
-		body = []byte(url.Values{"title": {event.Title}, "text": {event.Text}, "time": {strconv.FormatInt(time.Now().Unix(), 10)}}.Encode())
+		body = []byte(url.Values{"title": {event.Title}, "text": {text}, "time": {strconv.FormatInt(event.Time.Unix(), 10)}}.Encode())
 	} else {
-		body, _ = json.Marshal(map[string]string{"title": event.Title, "text": event.Text, "time": time.Now().Format(time.RFC3339)})
+		body, _ = json.Marshal(map[string]string{"title": event.Title, "text": text, "time": event.Time.Format(time.RFC3339)})
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(string(body)))
 	if err != nil {

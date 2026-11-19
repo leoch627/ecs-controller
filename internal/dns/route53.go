@@ -120,11 +120,15 @@ func (r *route53) ListA(ctx context.Context, zone Zone, name, ip string) ([]Reco
 }
 
 func (r *route53) CreateA(ctx context.Context, zone Zone, name, ip string) error {
-	return r.change(ctx, zone, "CREATE", normalizeName(name)+".", 300, []string{ip})
+	return withShortestTTL("route53", zone.ID, ttlRoute53, func(ttl int) error {
+		return r.change(ctx, zone, "CREATE", normalizeName(name)+".", ttl, []string{ip})
+	})
 }
 
 func (r *route53) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
-	return r.change(ctx, zone, "UPSERT", r.rawName(record), record.TTL, values)
+	return withShortestTTL("route53", zone.ID, ttlRoute53, func(ttl int) error {
+		return r.change(ctx, zone, "UPSERT", r.rawName(record), ttl, values)
+	})
 }
 
 // DeleteA must repeat the record's exact TTL and values or Route 53 rejects it.

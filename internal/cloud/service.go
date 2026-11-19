@@ -515,6 +515,10 @@ func (s *Service) RunInstances(ctx context.Context, req RunRequest) (RunResult, 
 	if req.DiskCategory != "" {
 		p["SystemDisk.Category"] = req.DiskCategory
 	}
+	if req.DiskCategory == "cloud_essd" && req.DiskSize > 0 && req.DiskSize < 20 {
+		// ESSD defaults to PL1, whose floor is 20 GB; PL0 starts at 1 GB.
+		p["SystemDisk.PerformanceLevel"] = "PL0"
+	}
 	if req.DiskSize > 0 {
 		p["SystemDisk.Size"] = strconv.Itoa(req.DiskSize)
 	}
@@ -1044,13 +1048,11 @@ func (s *Service) PrepareNetworkForPort(ctx context.Context, region, cidr, zone,
 		return vpcID, vsID, "", err
 	}
 	sgID := stringValue(sg["SecurityGroupId"])
-	if port <= 0 {
-		port = 22
-	}
-	if clientCIDR != "" && clientCIDR != "0.0.0.0/0" {
-		if _, authErr := s.ECS.Call(ctx, "AuthorizeSecurityGroup", map[string]string{"RegionId": region, "SecurityGroupId": sgID, "IpProtocol": "tcp", "PortRange": strconv.Itoa(port) + "/" + strconv.Itoa(port), "SourceCidrIp": clientCIDR, "Policy": "accept", "Priority": "1", "Description": "ecs-controller remote access"}); authErr != nil {
-			return vpcID, vsID, sgID, authErr
-		}
+	// New instances accept every IPv4 address on every port and protocol;
+	// clientCIDR and port are kept in the signature for older callers.
+	_, _ = clientCIDR, port
+	if _, authErr := s.ECS.Call(ctx, "AuthorizeSecurityGroup", map[string]string{"RegionId": region, "SecurityGroupId": sgID, "IpProtocol": "all", "PortRange": "-1/-1", "SourceCidrIp": "0.0.0.0/0", "Policy": "accept", "Priority": "1", "Description": "ecs-controller allow all IPv4"}); authErr != nil {
+		return vpcID, vsID, sgID, authErr
 	}
 	return vpcID, vsID, sgID, nil
 }

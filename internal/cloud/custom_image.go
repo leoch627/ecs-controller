@@ -39,6 +39,20 @@ type CustomImageClient interface {
 	DeleteImportedImage(ctx context.Context, region, id string) (deleted bool, err error)
 }
 
+// The default custom image: Debian 13 trixie minimal (btrfs, ~264 MB qcow2)
+// that boots from a 1 GB system disk with BIOS/GRUB.
+const (
+	DefaultImageURL      = "https://github.com/ninjayo/debian13-minimal-for1gdisk/releases/download/v1.0/debian-final.qcow2"
+	DefaultImageName     = "debian13-1g"
+	DefaultImagePassword = "nodeseekdebian13js"
+)
+
+// IsDefaultImage reports whether a create request uses the default image,
+// which the controller knows how to log in to and repair after boot.
+func IsDefaultImage(name, sourceURL string) bool {
+	return strings.TrimSpace(sourceURL) == DefaultImageURL || strings.TrimSpace(name) == DefaultImageName
+}
+
 const (
 	imageImportRole      = "AliyunECSImageImportDefaultRole"
 	imageImportPolicy    = "AliyunECSImageImportRolePolicy"

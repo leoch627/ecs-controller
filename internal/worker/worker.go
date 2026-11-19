@@ -28,6 +28,10 @@ type Worker struct {
 	// CustomImagePoll is how often to check that a new instance is running
 	// before deleting its imported image; zero uses the default.
 	CustomImagePoll time.Duration
+	// RemoteExec runs a command on a new instance over SSH; nil uses SSH.
+	RemoteExec func(ctx context.Context, addr, user, password, command, stdin string) (string, error)
+	// SSHRetryInterval is the wait between SSH attempts while an instance boots.
+	SSHRetryInterval time.Duration
 }
 
 const cloudInventoryInterval = 10 * time.Minute
@@ -130,7 +134,7 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 						metadata["protection_suspended"] = true
 						metadata["protection_suspend_reason"] = "credential_invalid"
 						if account.ProtectionNotifiedAt == 0 {
-							w.dispatchEvent(ctx, notify.Event{Title: "阿里云凭据异常", Summary: "已暂停自动停机保护", AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】阿里云凭据异常\n账号/实例: %s\n实例 ID: %s\n区域: %s\n错误: %s\n系统已暂停自动停机保护，请更新 AK 后恢复。", accountLabel(account), account.InstanceID, account.RegionID, describeErr.Error()), Fields: map[string]string{"instance_id": account.InstanceID, "reason": "credential_invalid"}})
+							w.dispatchEvent(ctx, notify.Event{Title: "阿里云凭据异常", Summary: "已暂停自动停机保护", AccountID: accountLabel(account), Lines: append(notify.InstanceLines(accountLabel(account), account.InstanceID, account.RegionID), notify.L("原因", describeErr.Error()), notify.L("说明", "系统已暂停自动停机保护，请更新 AK 后恢复。")), Fields: map[string]string{"instance_id": account.InstanceID, "reason": "credential_invalid"}})
 							account.ProtectionNotifiedAt = now.Unix()
 							metadata["protection_suspend_notified_at"] = account.ProtectionNotifiedAt
 						}
@@ -165,7 +169,7 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 						account.ProtectionSuspended, account.ProtectionSuspendReason = false, ""
 					}
 					if reason == "credential_invalid" && account.ProtectionNotifiedAt == 0 {
-						w.dispatchEvent(ctx, notify.Event{Title: "阿里云凭据异常", Summary: "已暂停自动停机保护", AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】阿里云凭据异常\n账号/实例: %s\n实例 ID: %s\n错误: %s\n系统已暂停自动停机保护，请更新 AK 后恢复。", accountLabel(account), account.InstanceID, trafficErr.Error()), Fields: map[string]string{"instance_id": account.InstanceID, "reason": "credential_invalid"}})
+						w.dispatchEvent(ctx, notify.Event{Title: "阿里云凭据异常", Summary: "已暂停自动停机保护", AccountID: accountLabel(account), Lines: append(notify.InstanceLines(accountLabel(account), account.InstanceID, account.RegionID), notify.L("原因", trafficErr.Error()), notify.L("说明", "系统已暂停自动停机保护，请更新 AK 后恢复。")), Fields: map[string]string{"instance_id": account.InstanceID, "reason": "credential_invalid"}})
 						account.ProtectionNotifiedAt = now.Unix()
 					}
 					if err := w.saveMonitored(&account); err != nil {
@@ -215,7 +219,7 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 					w.Store.AddLog("error", "保存监控状态失败: "+err.Error())
 				}
 				if account.PublicIP != "" && account.PublicIP != oldPublicIP {
-					w.dispatchEvent(ctx, notify.Event{Title: "公网 IP 已变化", Summary: fmt.Sprintf("%s 公网 IP 已从 %s 变为 %s", accountLabel(account), oldPublicIP, account.PublicIP), AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】公网 IP 已变化\n实例: %s\n实例 ID: %s\n旧 IP: %s\n新 IP: %s\n时间: %s", accountLabel(account), account.InstanceID, oldPublicIP, account.PublicIP, time.Now().Format("2006-01-02 15:04:05")), Fields: map[string]string{"old_ip": oldPublicIP, "new_ip": account.PublicIP, "instance_id": account.InstanceID}})
+					w.dispatchEvent(ctx, notify.Event{Title: "公网 IP 已变化", Summary: fmt.Sprintf("%s 公网 IP 已从 %s 变为 %s", accountLabel(account), oldPublicIP, account.PublicIP), AccountID: accountLabel(account), Lines: append(notify.InstanceLines(accountLabel(account), account.InstanceID, account.RegionID), notify.L("旧 IP", oldPublicIP), notify.L("新 IP", account.PublicIP)), Fields: map[string]string{"old_ip": oldPublicIP, "new_ip": account.PublicIP, "instance_id": account.InstanceID}})
 				}
 			}
 			w.syncDDNSPool(ctx, now)
@@ -768,7 +772,7 @@ func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
 		return err
 	}
 	w.syncDDNSPool(ctx, time.Now())
-	w.dispatchEvent(ctx, notify.Event{Title: "实例已释放", Summary: "实例已从云端释放，本地记录已清理。", AccountID: accountLabel(*account), Text: fmt.Sprintf("【ECS 控制台】实例已释放\n实例: %s\n实例 ID: %s\n区域: %s\n公网 IP: %s\n时间: %s", accountLabel(*account), account.InstanceID, account.RegionID, account.PublicIP, time.Now().Format("2006-01-02 15:04:05")), Fields: map[string]string{"instance_id": account.InstanceID, "region": account.RegionID, "public_ip": account.PublicIP}})
+	w.dispatchEvent(ctx, notify.Event{Title: "实例已释放", Summary: "实例已从云端释放，本地记录已清理。", AccountID: accountLabel(*account), Lines: append(notify.InstanceLines(accountLabel(*account), account.InstanceID, account.RegionID), notify.L("公网 IP", account.PublicIP)), Fields: map[string]string{"instance_id": account.InstanceID, "region": account.RegionID, "public_ip": account.PublicIP}})
 	w.Store.AddLog("info", "实例已异步释放: "+account.InstanceID)
 	return nil
 }
@@ -929,8 +933,32 @@ func (w *Worker) createECS(ctx context.Context, job *store.Job) (err error) {
 		_ = w.Store.UpdateTask(task.TaskID, map[string]any{"step": "清理自定义镜像"})
 		w.cleanupCustomImage(ctx, client, task.RegionID, createdInstance, stringOr(payload, "imageId", ""))
 	}
-	_ = w.Store.UpdateTask(task.TaskID, map[string]any{"status": "success", "step": "创建完成", "public_ip": publicIP, "login_user": stringOr(payload, "loginUser", "root"), "login_password": password, "error_message": ""})
-	w.dispatchEvent(ctx, notify.Event{Title: "ECS 创建成功", Summary: "实例已创建并启动，请保存一次性登录密码。", AccountID: group.Remark, Text: fmt.Sprintf("【ECS 控制台】ECS 创建成功\n账号: %s\n实例 ID: %s\n区域: %s\n规格: %s\n公网 IP: %s\n登录用户: %s\n初始密码: %s\n请立即保存并修改初始密码。", group.Remark, createdInstance, task.RegionID, task.InstanceType, publicIP, stringOr(payload, "loginUser", "root"), password), Fields: map[string]string{"instance_id": createdInstance, "region": task.RegionID, "public_ip": publicIP, "password": password}})
+	doneStep, bootstrapNote := "创建完成", ""
+	if customImage && cloud.IsDefaultImage(stringOr(payload, "customImageName", ""), stringOr(payload, "customImageUrl", "")) {
+		_ = w.Store.UpdateTask(task.TaskID, map[string]any{"step": "初始化系统（修复极简环境、更换 root 密码）"})
+		loginPort := intField(payload, "loginPort")
+		if loginPort == 0 {
+			loginPort = loginPortForOS(stringOr(payload, "osKey", ""))
+		}
+		newPassword, bootErr := w.bootstrapDefaultImage(ctx, publicIP, loginPort, stringOr(payload, "loginUser", "root"), password)
+		if newPassword != "" {
+			password = newPassword
+		}
+		switch {
+		case bootErr == nil:
+			bootstrapNote = "已修复极简环境并把 root 密码换成随机密码"
+		case newPassword != "":
+			bootstrapNote = "root 密码已换成随机密码，但" + bootErr.Error() + "；请登录后手动执行修复命令"
+		default:
+			bootstrapNote = "自动初始化失败：" + bootErr.Error() + "；请用镜像默认密码登录，手动执行修复命令并立即修改密码"
+		}
+		if bootErr != nil {
+			doneStep = "创建完成，系统初始化未完成"
+			w.Store.AddLog("warning", fmt.Sprintf("%s 系统初始化未完成: %s", createdInstance, bootstrapNote))
+		}
+	}
+	_ = w.Store.UpdateTask(task.TaskID, map[string]any{"status": "success", "step": doneStep, "public_ip": publicIP, "login_user": stringOr(payload, "loginUser", "root"), "login_password": password, "error_message": ""})
+	w.dispatchEvent(ctx, notify.Event{Title: "ECS 创建成功", Summary: "实例已创建并启动，请保存一次性登录密码。", AccountID: group.Remark, Lines: []notify.Line{notify.L("账号", group.Remark), notify.L("实例 ID", createdInstance), notify.L("区域", task.RegionID), notify.L("规格", task.InstanceType), notify.L("公网 IP", publicIP), notify.L("登录用户", stringOr(payload, "loginUser", "root")), notify.L("初始密码", password), notify.L("系统初始化", bootstrapNote), notify.L("说明", "请立即保存并修改初始密码。")}, Fields: map[string]string{"instance_id": createdInstance, "region": task.RegionID, "public_ip": publicIP, "password": password}})
 	return nil
 }
 

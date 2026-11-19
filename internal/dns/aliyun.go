@@ -92,17 +92,21 @@ func (a *aliyun) CreateA(ctx context.Context, zone Zone, name, ip string) error 
 	if err != nil {
 		return err
 	}
-	_, err = a.call(ctx, "AddDomainRecord", map[string]string{"DomainName": zone.Name, "RR": host, "Type": "A", "Value": ip, "TTL": "600"})
-	return err
+	return withShortestTTL("aliyun", zone.Name, ttlAliyun, func(ttl int) error {
+		_, err := a.call(ctx, "AddDomainRecord", map[string]string{"DomainName": zone.Name, "RR": host, "Type": "A", "Value": ip, "TTL": strconv.Itoa(ttl)})
+		return err
+	})
 }
 
 func (a *aliyun) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
-	params := map[string]string{"RecordId": record.ID, "RR": fmt.Sprint(record.Raw["rr"]), "Type": "A", "Value": values[0], "TTL": strconv.Itoa(record.TTL)}
-	if line, _ := record.Raw["line"].(string); line != "" && line != "<nil>" {
-		params["Line"] = line
-	}
-	_, err := a.call(ctx, "UpdateDomainRecord", params)
-	return err
+	return withShortestTTL("aliyun", zone.Name, ttlAliyun, func(ttl int) error {
+		params := map[string]string{"RecordId": record.ID, "RR": fmt.Sprint(record.Raw["rr"]), "Type": "A", "Value": values[0], "TTL": strconv.Itoa(ttl)}
+		if line, _ := record.Raw["line"].(string); line != "" && line != "<nil>" {
+			params["Line"] = line
+		}
+		_, err := a.call(ctx, "UpdateDomainRecord", params)
+		return err
+	})
 }
 
 func (a *aliyun) DeleteA(ctx context.Context, zone Zone, record Record) error {

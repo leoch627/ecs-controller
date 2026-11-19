@@ -157,8 +157,9 @@ func TestDailyTrafficEventReportsAccountTotals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(event.Text, "账号流量已使用：\n- 香港账号：8.20 GB/190 GB") || !strings.Contains(event.Text, "数据状态：完整") || strings.Contains(event.Text, "CMS") {
-		t.Fatalf("unexpected daily traffic event:\n%s", event.Text)
+	text := event.Text()
+	if !strings.HasPrefix(text, "【ECS 控制台】每日流量摘要\n") || !strings.Contains(text, "账号流量已使用：\n- 香港账号：8.20 GB/190 GB") || !strings.Contains(text, "数据状态: 完整") || strings.Contains(text, "CMS") {
+		t.Fatalf("unexpected daily traffic event:\n%s", text)
 	}
 }
 

@@ -108,15 +108,20 @@ func (h *huawei) ListA(ctx context.Context, zone Zone, name, ip string) ([]Recor
 }
 
 func (h *huawei) CreateA(ctx context.Context, zone Zone, name, ip string) error {
-	return h.api(ctx, http.MethodPost, "/v2.1/zones/"+url.PathEscape(zone.ID)+"/recordsets", nil, map[string]any{
-		"name": normalizeName(name) + ".", "type": "A", "ttl": 300, "records": []string{ip}, "description": "Managed by ECS 控制台",
-	}, nil)
+	return withShortestTTL("huawei", zone.ID, ttlHuawei, func(ttl int) error {
+		return h.api(ctx, http.MethodPost, "/v2.1/zones/"+url.PathEscape(zone.ID)+"/recordsets", nil, map[string]any{
+			"name": normalizeName(name) + ".", "type": "A", "ttl": ttl, "records": []string{ip}, "description": "Managed by ECS 控制台",
+		}, nil)
+	})
 }
 
 func (h *huawei) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
-	return h.api(ctx, http.MethodPut, "/v2.1/zones/"+url.PathEscape(h.zoneOf(zone, record))+"/recordsets/"+url.PathEscape(record.ID), nil, map[string]any{
-		"name": record.Name + ".", "type": "A", "ttl": record.TTL, "records": values,
-	}, nil)
+	zoneID := h.zoneOf(zone, record)
+	return withShortestTTL("huawei", zoneID, ttlHuawei, func(ttl int) error {
+		return h.api(ctx, http.MethodPut, "/v2.1/zones/"+url.PathEscape(zoneID)+"/recordsets/"+url.PathEscape(record.ID), nil, map[string]any{
+			"name": record.Name + ".", "type": "A", "ttl": ttl, "records": values,
+		}, nil)
+	})
 }
 
 func (h *huawei) DeleteA(ctx context.Context, zone Zone, record Record) error {

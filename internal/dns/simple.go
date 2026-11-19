@@ -63,8 +63,10 @@ func (n *namesilo) CreateA(ctx context.Context, zone Zone, name, ip string) erro
 	if err != nil {
 		return err
 	}
-	_, err = n.call(ctx, "dnsAddRecord", url.Values{"domain": {zone.Name}, "rrtype": {"A"}, "rrhost": {host}, "rrvalue": {ip}, "rrttl": {"3600"}})
-	return err
+	return withShortestTTL("namesilo", zone.Name, ttlNameSilo, func(ttl int) error {
+		_, err := n.call(ctx, "dnsAddRecord", url.Values{"domain": {zone.Name}, "rrtype": {"A"}, "rrhost": {host}, "rrvalue": {ip}, "rrttl": {strconv.Itoa(ttl)}})
+		return err
+	})
 }
 
 func (n *namesilo) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
@@ -72,12 +74,10 @@ func (n *namesilo) UpdateA(ctx context.Context, zone Zone, record Record, values
 	if err != nil {
 		return err
 	}
-	ttl := record.TTL
-	if ttl < 3600 {
-		ttl = 3600
-	}
-	_, err = n.call(ctx, "dnsUpdateRecord", url.Values{"domain": {zone.Name}, "rrid": {record.ID}, "rrhost": {host}, "rrvalue": {values[0]}, "rrttl": {strconv.Itoa(ttl)}})
-	return err
+	return withShortestTTL("namesilo", zone.Name, ttlNameSilo, func(ttl int) error {
+		_, err := n.call(ctx, "dnsUpdateRecord", url.Values{"domain": {zone.Name}, "rrid": {record.ID}, "rrhost": {host}, "rrvalue": {values[0]}, "rrttl": {strconv.Itoa(ttl)}})
+		return err
+	})
 }
 
 func (n *namesilo) DeleteA(ctx context.Context, zone Zone, record Record) error {
@@ -162,7 +162,9 @@ func (p *porkbun) CreateA(ctx context.Context, zone Zone, name, ip string) error
 	if err != nil {
 		return err
 	}
-	return p.call(ctx, "dns/create/"+url.PathEscape(zone.Name), map[string]any{"name": host, "type": "A", "content": ip, "ttl": 600}, nil)
+	return withShortestTTL("porkbun", zone.Name, ttlPorkbun, func(ttl int) error {
+		return p.call(ctx, "dns/create/"+url.PathEscape(zone.Name), map[string]any{"name": host, "type": "A", "content": ip, "ttl": ttl}, nil)
+	})
 }
 
 func (p *porkbun) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
@@ -170,7 +172,9 @@ func (p *porkbun) UpdateA(ctx context.Context, zone Zone, record Record, values 
 	if err != nil {
 		return err
 	}
-	return p.call(ctx, "dns/edit/"+url.PathEscape(zone.Name)+"/"+url.PathEscape(record.ID), map[string]any{"name": host, "type": "A", "content": values[0], "ttl": record.TTL}, nil)
+	return withShortestTTL("porkbun", zone.Name, ttlPorkbun, func(ttl int) error {
+		return p.call(ctx, "dns/edit/"+url.PathEscape(zone.Name)+"/"+url.PathEscape(record.ID), map[string]any{"name": host, "type": "A", "content": values[0], "ttl": ttl}, nil)
+	})
 }
 
 func (p *porkbun) DeleteA(ctx context.Context, zone Zone, record Record) error {
@@ -273,15 +277,15 @@ func (g *godaddy) CreateA(ctx context.Context, zone Zone, name, ip string) error
 	if err != nil {
 		return err
 	}
-	return g.put(ctx, zone, host, []string{ip}, 600)
+	return withShortestTTL("godaddy", zone.Name, ttlGoDaddy, func(ttl int) error {
+		return g.put(ctx, zone, host, []string{ip}, ttl)
+	})
 }
 
 func (g *godaddy) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
-	ttl := record.TTL
-	if ttl < 600 {
-		ttl = 600
-	}
-	return g.put(ctx, zone, fmt.Sprint(record.Raw["host"]), values, ttl)
+	return withShortestTTL("godaddy", zone.Name, ttlGoDaddy, func(ttl int) error {
+		return g.put(ctx, zone, fmt.Sprint(record.Raw["host"]), values, ttl)
+	})
 }
 
 // DeleteA removes every A record of the host, which is this record set.
@@ -390,11 +394,11 @@ func (d *digitalOcean) CreateA(ctx context.Context, zone Zone, name, ip string) 
 	if err != nil {
 		return err
 	}
-	return d.api(ctx, http.MethodPost, "/domains/"+url.PathEscape(zone.Name)+"/records", map[string]any{"type": "A", "name": host, "data": ip, "ttl": 300}, nil)
+	return d.api(ctx, http.MethodPost, "/domains/"+url.PathEscape(zone.Name)+"/records", map[string]any{"type": "A", "name": host, "data": ip, "ttl": ttlDigitalOcean[0]}, nil)
 }
 
 func (d *digitalOcean) UpdateA(ctx context.Context, zone Zone, record Record, values []string) error {
-	return d.api(ctx, http.MethodPut, "/domains/"+url.PathEscape(zone.Name)+"/records/"+url.PathEscape(record.ID), map[string]any{"type": "A", "name": record.Raw["host"], "data": values[0], "ttl": record.TTL}, nil)
+	return d.api(ctx, http.MethodPut, "/domains/"+url.PathEscape(zone.Name)+"/records/"+url.PathEscape(record.ID), map[string]any{"type": "A", "name": record.Raw["host"], "data": values[0], "ttl": ttlDigitalOcean[0]}, nil)
 }
 
 func (d *digitalOcean) DeleteA(ctx context.Context, zone Zone, record Record) error {

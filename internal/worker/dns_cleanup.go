@@ -120,8 +120,13 @@ func dnsCleanupEvent(payload store.DNSCleanupPayload, title, result string) noti
 		Title:     title,
 		Summary:   result,
 		AccountID: payload.Label,
-		Text: fmt.Sprintf("【ECS 控制台】%s\n实例: %s\n公网 IP: %s\n触发原因: %s\n处理结果: %s\n时间: %s",
-			title, payload.Label, payload.IP, reason, result, time.Now().Format("2006-01-02 15:04:05")),
+		Lines: []notify.Line{
+			notify.L("实例", payload.Label),
+			notify.L("实例 ID", payload.InstanceID),
+			notify.L("公网 IP", payload.IP),
+			notify.L("触发原因", reason),
+			notify.L("结果", result),
+		},
 		Fields: map[string]string{"ip": payload.IP, "instance_id": payload.InstanceID, "reason": payload.Reason},
 	}
 }

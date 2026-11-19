@@ -39,8 +39,8 @@ type Info struct {
 
 var registry = []Info{
 	{
-		ID: "aliyun", Label: "阿里云", Market: "cn", TTL: 600,
-		Hint: "建议单独建一个 RAM 用户并授予 AliyunDNSFullAccess；也可以用 ECS 账号的 AK，前提是它有云解析权限。免费版解析的 TTL 最低 600 秒。",
+		ID: "aliyun", Label: "阿里云", Market: "cn", TTL: 1,
+		Hint: "建议单独建一个 RAM 用户并授予 AliyunDNSFullAccess；也可以用 ECS 账号的 AK，前提是它有云解析权限。解析 TTL 按套餐取最低值（免费版 600 秒，付费版可到 1 秒）。",
 		Fields: []Field{
 			{Key: "access_key_id", Label: "AccessKey ID", Type: "text", Required: true, Placeholder: "LTAI…"},
 			{Key: "access_key_secret", Label: "AccessKey Secret", Type: "secret", Required: true},
@@ -52,8 +52,8 @@ var registry = []Info{
 		create: func(c Config, h *http.Client) Provider { return newAliyun(c, h) },
 	},
 	{
-		ID: "dnspod", Label: "腾讯云 DNSPod", Market: "cn", TTL: 600,
-		Hint: "使用腾讯云「访问管理 → API 密钥」的 SecretId / SecretKey（不是旧版 DNSPod Token），子用户需要 QcloudDNSPodFullAccess。免费套餐 TTL 最低 600 秒。",
+		ID: "dnspod", Label: "腾讯云 DNSPod", Market: "cn", TTL: 1,
+		Hint: "使用腾讯云「访问管理 → API 密钥」的 SecretId / SecretKey（不是旧版 DNSPod Token），子用户需要 QcloudDNSPodFullAccess。解析 TTL 按套餐取最低值（免费套餐 600 秒，付费套餐更低）。",
 		Fields: []Field{
 			{Key: "secret_id", Label: "SecretId", Type: "text", Required: true, Placeholder: "AKID…"},
 			{Key: "secret_key", Label: "SecretKey", Type: "secret", Required: true},
@@ -65,7 +65,7 @@ var registry = []Info{
 		create: func(c Config, h *http.Client) Provider { return &dnspod{cfg: c, http: h} },
 	},
 	{
-		ID: "huawei", Label: "华为云", Market: "cn", TTL: 300, prefix: "hw",
+		ID: "huawei", Label: "华为云", Market: "cn", TTL: 1, prefix: "hw",
 		Hint: "在华为云 IAM 为该 AK 授予 DNS FullAccess，或自定义策略包含 dns:zone:list、dns:recordset:list、dns:recordset:create、dns:recordset:update、dns:recordset:delete。",
 		Fields: []Field{
 			{Key: "ak", Label: "Access Key ID", Type: "text", Required: true, Placeholder: "华为云 AK"},
@@ -82,7 +82,7 @@ var registry = []Info{
 		create: func(c Config, h *http.Client) Provider { return &huawei{cfg: c, http: h} },
 	},
 	{
-		ID: "cloudflare", Label: "Cloudflare", Market: "global", TTL: 1, prefix: "cf",
+		ID: "cloudflare", Label: "Cloudflare", Market: "global", TTL: 60, prefix: "cf",
 		Hint: "在 Cloudflare「My Profile → API Tokens」创建 Token，权限选 Zone · DNS · Edit 和 Zone · Zone · Read，资源选要管理的域名。",
 		Fields: []Field{
 			{Key: "token", Label: "API Token", Type: "secret", Required: true, Placeholder: "需要 Zone · DNS · Edit 权限"},
@@ -92,7 +92,7 @@ var registry = []Info{
 		create: func(c Config, h *http.Client) Provider { return &cloudflare{cfg: c, http: h} },
 	},
 	{
-		ID: "route53", Label: "AWS Route 53", Market: "global", TTL: 300,
+		ID: "route53", Label: "AWS Route 53", Market: "global", TTL: 60,
 		Hint: "IAM 策略需要 route53:ListHostedZones、route53:ListResourceRecordSets、route53:ChangeResourceRecordSets。带路由策略或别名的记录会被跳过。",
 		Fields: []Field{
 			{Key: "access_key_id", Label: "Access Key ID", Type: "text", Required: true, Placeholder: "AKIA…"},
@@ -128,7 +128,7 @@ var registry = []Info{
 		create: func(c Config, h *http.Client) Provider { return &godaddy{cfg: c, http: h} },
 	},
 	{
-		ID: "digitalocean", Label: "DigitalOcean", Market: "global", TTL: 300,
+		ID: "digitalocean", Label: "DigitalOcean", Market: "global", TTL: 30,
 		Hint: "在 DigitalOcean「API → Tokens」创建 Token，自定义权限至少勾选 domain 的 read、create、update、delete。",
 		Fields: []Field{
 			{Key: "token", Label: "Personal Access Token", Type: "secret", Required: true, Placeholder: "dop_v1_…"},

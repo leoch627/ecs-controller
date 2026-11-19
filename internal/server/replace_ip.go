@@ -192,7 +192,7 @@ func (s *Server) swapIP(client cloud.Client, a *app.Account, announce bool) (ipS
 		}
 		s.Store.AddLog("error", message)
 		if announce {
-			s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 更换失败", Summary: fmt.Sprintf("%s 公网 IP 更换失败", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】公网 IP 更换失败\n实例: %s\n旧 IP: %s\n区域: %s\n原因: %s", accountDisplay(*a), oldIP, a.RegionID, message), Fields: map[string]string{"old_ip": oldIP, "instance_id": a.InstanceID}})
+			s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 更换失败", Summary: fmt.Sprintf("%s 公网 IP 更换失败", accountDisplay(*a)), AccountID: accountDisplay(*a), Lines: append(notify.InstanceLines(accountDisplay(*a), a.InstanceID, a.RegionID), notify.L("旧 IP", oldIP), notify.L("原因", message)), Fields: map[string]string{"old_ip": oldIP, "instance_id": a.InstanceID}})
 		}
 		return fail(400, message)
 	}
@@ -235,8 +235,7 @@ func (s *Server) swapIP(client cloud.Client, a *app.Account, announce bool) (ipS
 	// a later reachability check swaps again.
 	s.syncDNSAfterSwap(id)
 	if announce {
-		text := fmt.Sprintf("【ECS 控制台】公网 IP 已更换\n实例: %s\n旧 IP: %s\n新 IP: %s\n区域: %s", accountDisplay(*a), oldIP, ip, a.RegionID)
-		s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Text: text, Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
+		s.dispatchEvent(rctx(), notify.Event{Title: "公网 IP 已更换", Summary: fmt.Sprintf("%s 的公网 IP 已更换", accountDisplay(*a)), AccountID: accountDisplay(*a), Lines: append(notify.InstanceLines(accountDisplay(*a), a.InstanceID, a.RegionID), notify.L("旧 IP", oldIP), notify.L("新 IP", ip)), Fields: map[string]string{"old_ip": oldIP, "new_ip": ip, "instance_id": a.InstanceID}})
 	}
 	return ipSwap{OldIP: oldIP, NewIP: ip, AllocationID: alloc, Bandwidth: bandwidth}, nil
 }
@@ -265,18 +264,12 @@ func (s *Server) replaceUntilReachable(id int64, cfg ipCheckSettings) {
 	)
 	finish := func(kind, title, outcome string) {
 		s.Store.AddLog(kind, fmt.Sprintf("%s %s", name, outcome))
-		lines := []string{"【ECS 控制台】" + title, "实例: " + name, "区域: " + region}
-		if firstIP != "" {
-			lines = append(lines, "原 IP: "+firstIP)
-		}
-		if currentIP != "" {
-			lines = append(lines, "当前 IP: "+currentIP)
-		}
-		if len(blocked) > 0 {
-			lines = append(lines, "被墙的 IP: "+strings.Join(blocked, "、"))
-		}
-		lines = append(lines, "结果: "+outcome)
-		s.dispatchEvent(rctx(), notify.Event{Title: title, Summary: name + " " + outcome, AccountID: name, Text: strings.Join(lines, "\n"), Fields: map[string]string{"old_ip": firstIP, "new_ip": currentIP, "instance_id": instanceID}})
+		lines := append(notify.InstanceLines(name, instanceID, region),
+			notify.L("旧 IP", firstIP),
+			notify.L("当前 IP", currentIP),
+			notify.L("被墙的 IP", strings.Join(blocked, "、")),
+			notify.L("结果", outcome))
+		s.dispatchEvent(rctx(), notify.Event{Title: title, Summary: name + " " + outcome, AccountID: name, Lines: lines, Fields: map[string]string{"old_ip": firstIP, "new_ip": currentIP, "instance_id": instanceID}})
 	}
 	for attempt := 1; attempt <= cfg.MaxSwaps; attempt++ {
 		a, err := s.Store.Account(id, false)

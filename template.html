@@ -6436,7 +6436,7 @@
                                         />
                                     </div>
 	                                    <textarea v-model="config.Notification.webhook.headers" class="glass-textarea" placeholder='请求头配置，例如 {"Authorization":"Bearer xxx"}'></textarea>
-	                                    <textarea v-model="config.Notification.webhook.body" class="glass-textarea" placeholder='消息模板，例如 {"title":"#TITLE#","msg":"#MSG#"}'></textarea>
+	                                    <textarea v-model="config.Notification.webhook.body" class="glass-textarea" placeholder='消息模板，例如 {"title":"#TITLE#","msg":"#MSG#"}；#TEXT# 为完整通知正文，#TIME# 为发送时间'></textarea>
                                     <button @click="sendTestWebhook" class="solid-button" :disabled="testingWebhook">{{ testingWebhook ? '发送中...' : '发送测试消息' }}</button>
                                 </div>
                                     </div>
@@ -7021,7 +7021,7 @@
                     <template v-if="ecsCreateDraft.osKey === 'custom'">
                         <div style="grid-column: 1 / -1;">
                             <label class="field-label">镜像下载地址</label>
-                            <input v-model.trim="ecsCreateDraft.customImageUrl" class="glass-input" placeholder="https://example.com/alpine.qcow2">
+                            <input v-model.trim="ecsCreateDraft.customImageUrl" class="glass-input" placeholder="默认 Debian 13 极简版（1G 硬盘可用）">
                             <p class="mt-2 text-xs text-slate-500">qcow2 / raw / vhd 文件直链（不能是压缩包）。创建时由控制台下载、上传到同区域临时 OSS Bucket 并导入为自定义镜像；实例运行后自动删除 Bucket、镜像和快照。</p>
                         </div>
                         <div>
@@ -7032,7 +7032,7 @@
                         <div>
                             <label class="field-label">镜像默认密码（可选）</label>
                             <input v-model="ecsCreateDraft.customImagePassword" class="glass-input" placeholder="仅用于创建完成后展示">
-                            <p class="mt-2 text-xs text-slate-500">自定义镜像不会注入随机密码，需用镜像自带的账号密码登录。</p>
+                            <p class="mt-2 text-xs text-slate-500">{{ ecsCreateDraft.customImageUrl === DEFAULT_CUSTOM_IMAGE.url ? '默认 Debian 13 镜像创建后，控制台会自动修复极简环境并把 root 密码换成随机密码。' : '自定义镜像不会注入随机密码，需用镜像自带的账号密码登录。' }}</p>
                         </div>
                     </template>
                     <div>
@@ -7703,14 +7703,26 @@
                     { value: 'custom', label: '自定义镜像（OSS 上传导入）' }
                 ];
 
+                // Debian 13 minimal (btrfs, ~264 MB qcow2) that boots from a 1 GB disk.
+                // The controller logs in once with its default password, repairs the
+                // minimal environment and replaces the password with a random one.
+                const DEFAULT_CUSTOM_IMAGE = {
+                    url: 'https://github.com/ninjayo/debian13-minimal-for1gdisk/releases/download/v1.0/debian-final.qcow2',
+                    name: 'debian13-1g',
+                    password: 'nodeseekdebian13js'
+                };
+
+                // Below 20 GB only ESSD (created as PL0) and ESSD AutoPL are accepted.
+                const smallDiskCategory = (options) => ['cloud_essd', 'cloud_auto'].find((value) => options.some((item) => item.value === value));
+
                 const createDefaultEcsDraft = () => ({
                     accountGroupKey: '',
                     regionId: '',
                     instanceType: 'ecs.e-c4m1.large',
                     osKey: 'debian_12',
-                    customImageUrl: '',
-                    customImageName: '',
-                    customImagePassword: '',
+                    customImageUrl: DEFAULT_CUSTOM_IMAGE.url,
+                    customImageName: DEFAULT_CUSTOM_IMAGE.name,
+                    customImagePassword: DEFAULT_CUSTOM_IMAGE.password,
                     systemDiskSize: 20,
                     systemDiskCategory: 'cloud_essd_entry',
                     publicIpMode: 'ecs_public_ip',
@@ -9793,6 +9805,9 @@
                         if (!options.some((item) => item.value === ecsCreateDraft.value.systemDiskCategory)) {
                             ecsCreateDraft.value.systemDiskCategory = options[0].value;
                         }
+                        if (Number(ecsCreateDraft.value.systemDiskSize) < 20 && smallDiskCategory(options)) {
+                            ecsCreateDraft.value.systemDiskCategory = smallDiskCategory(options);
+                        }
 
                         ecsDiskHint.value = `来自阿里云 API：${getRegionName(json.data.regionId)} / ${json.data.zoneId}。`;
                     } catch (error) {
@@ -10530,9 +10545,13 @@
                 });
 
                 watch(() => ecsCreateDraft.value.osKey, (osKey, previous) => {
-                    // A custom image can run on a 1 GB system disk; public images need 20 GB.
+                    // A custom image can run on a 1 GB ESSD system disk; public images need 20 GB.
                     if (osKey === 'custom') {
                         ecsCreateDraft.value.systemDiskSize = 1;
+                        const category = smallDiskCategory(ecsDiskCategoryOptions.value);
+                        if (category) {
+                            ecsCreateDraft.value.systemDiskCategory = category;
+                        }
                     } else if (previous === 'custom' && Number(ecsCreateDraft.value.systemDiskSize) < 20) {
                         ecsCreateDraft.value.systemDiskSize = 20;
                     }
@@ -10788,6 +10807,7 @@
                     sendTestEmail,
                     sendTestTelegram,
                     sendTestWebhook,
+                    DEFAULT_CUSTOM_IMAGE,
                     fetchLogs,
                     clearLogs,
                     checkForUpdates,

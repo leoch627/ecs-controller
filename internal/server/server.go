@@ -1024,8 +1024,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 	customName := ""
 	if customImage {
 		if customURL == "" && strings.TrimSpace(stringValue(data["customImageName"])) == "" {
-			s.error(w, 400, "请填写镜像下载地址，或填写已有自定义镜像的名称")
-			return
+			customURL, data["customImageName"] = cloud.DefaultImageURL, cloud.DefaultImageName
 		}
 		if customURL != "" {
 			if parsed, urlErr := url.Parse(customURL); urlErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
@@ -1039,11 +1038,17 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 		// Imported images usually ship without cloud-init, so the password set
 		// through the ECS API would not apply; show the image's own password.
 		password := stringValue(data["customImagePassword"])
+		if cloud.IsDefaultImage(customName, customURL) {
+			data["customImagePassword"] = cloud.DefaultImagePassword
+			password = cloud.DefaultImagePassword
+			warnings = append(warnings, "实例运行后控制台会用镜像默认密码登录一次，修复极简环境（服务自启、BBR）并把 root 密码换成随机密码；如果这一步失败，请用默认密码登录后手动执行并立即修改密码")
+		} else {
+			warnings = append(warnings, "自定义镜像不会注入随机密码，请使用镜像自带的默认密码登录并立即修改")
+		}
 		if password == "" {
 			password = "镜像默认密码"
 		}
 		data["loginPassword"] = password
-		warnings = append(warnings, "自定义镜像不会注入随机密码，请使用镜像自带的默认密码登录并立即修改")
 	}
 	previewClient := s.Cloud
 	if s.CloudFactory != nil {
@@ -1144,14 +1149,24 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 			return
 		} else if len(options) > 0 {
 			selected := selectDiskOption(options, diskCategory)
-			diskCategory = stringValue(selected["value"])
 			minSize, maxSize := number(selected["min"], 20), number(selected["max"], 32768)
 			if customImage {
 				// A custom image may be far smaller than the 20 GB floor that
-				// DescribeAvailableResource reports for public images.
+				// DescribeAvailableResource reports for public images. Below
+				// 20 GB only ESSD (created as PL0) and ESSD AutoPL are accepted.
 				minSize = 1
+				if diskSize < 20 && !smallDiskCategory(stringValue(selected["value"])) {
+					if small := firstSmallDiskOption(options); small != nil {
+						warnings = append(warnings, fmt.Sprintf("%s 系统盘最小 20 GB，已改用 %s 以使用 %d GB 系统盘", diskCategoryName(selected), diskCategoryName(small), diskSize))
+						selected = small
+					} else {
+						minSize = 20
+					}
+				}
 			}
+			diskCategory = stringValue(selected["value"])
 			if diskSize < minSize {
+				warnings = append(warnings, fmt.Sprintf("系统盘 %d GB 小于%s下限，已调整为 %d GB", diskSize, map[bool]string{true: "当前硬盘类型的", false: "镜像要求的"}[customImage], minSize))
 				diskSize = minSize
 			}
 			if diskSize > maxSize {
@@ -1171,7 +1186,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string
 	s.previews[id] = data
 	s.mu.Unlock()
 	minDisk, maxDisk := number(data["systemDiskMin"], 20), number(data["systemDiskMax"], 32768)
-	summary := map[string]any{"account": map[string]any{"label": group.Remark, "groupKey": group.GroupKey, "accessKeyId": maskAccessKey(group.AccessKeyID)}, "regionId": data["regionId"], "zoneId": data["zoneId"], "instanceType": instanceType, "instanceName": name, "osKey": osKey, "osLabel": osLabel, "imageId": imageID, "customImage": customImage, "loginUser": loginUser(osKey), "loginPort": loginPort, "clientCidrIp": data["clientCidrIp"], "systemDisk": map[string]any{"category": diskCategory, "size": diskSize, "min": minDisk, "max": maxDisk, "unit": "GB"}, "network": map[string]any{"vpc": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/16"}, "vswitch": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/24"}, "securityGroup": map[string]any{"name": "ecs-controller", "cidr": stringValue(data["clientCidrIp"]), "rules": []string{fmt.Sprintf("TCP %d / %s", loginPort, stringValue(data["clientCidrIp"]))}}}, "internetMaxBandwidthOut": bandwidth, "publicIpMode": publicMode, "publicIpModeLabel": map[string]string{"eip": "EIP 弹性公网 IP", "ecs_public_ip": "ECS 普通公网 IP"}[publicMode], "accountGroupKey": groupKey}
+	summary := map[string]any{"account": map[string]any{"label": group.Remark, "groupKey": group.GroupKey, "accessKeyId": maskAccessKey(group.AccessKeyID)}, "regionId": data["regionId"], "zoneId": data["zoneId"], "instanceType": instanceType, "instanceName": name, "osKey": osKey, "osLabel": osLabel, "imageId": imageID, "customImage": customImage, "loginUser": loginUser(osKey), "loginPort": loginPort, "clientCidrIp": data["clientCidrIp"], "systemDisk": map[string]any{"category": diskCategory, "size": diskSize, "min": minDisk, "max": maxDisk, "unit": "GB"}, "network": map[string]any{"vpc": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/16"}, "vswitch": map[string]any{"name": "ecs-controller", "cidr": "192.168.0.0/24"}, "securityGroup": map[string]any{"name": "ecs-controller", "cidr": "0.0.0.0/0", "rules": []string{"全部协议 全部端口 / 0.0.0.0/0"}}}, "internetMaxBandwidthOut": bandwidth, "publicIpMode": publicMode, "publicIpModeLabel": map[string]string{"eip": "EIP 弹性公网 IP", "ecs_public_ip": "ECS 普通公网 IP"}[publicMode], "accountGroupKey": groupKey}
 	if summary["publicIpModeLabel"] == "" {
 		summary["publicIpModeLabel"] = publicMode
 	}
@@ -1359,7 +1374,7 @@ func (s *Server) control(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 500, "实例状态已提交，但定时停机状态保存失败: "+err.Error())
 		return
 	}
-	s.dispatchEvent(rctx(), notify.Event{Title: "实例控制指令已提交", Summary: fmt.Sprintf("%s 已提交%s指令", accountDisplay(*a), map[string]string{"start": "开机", "stop": "停机"}[action]), AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】实例控制指令已提交\n实例: %s\n实例 ID: %s\n区域: %s\n动作: %s\n时间: %s", accountDisplay(*a), a.InstanceID, a.RegionID, action, time.Now().Format("2006-01-02 15:04:05")), Fields: map[string]string{"instance_id": a.InstanceID, "action": action, "region": a.RegionID}})
+	s.dispatchEvent(rctx(), notify.Event{Title: "实例控制指令已提交", Summary: fmt.Sprintf("%s 已提交%s指令", accountDisplay(*a), map[string]string{"start": "开机", "stop": "停机"}[action]), AccountID: accountDisplay(*a), Lines: append(notify.InstanceLines(accountDisplay(*a), a.InstanceID, a.RegionID), notify.L("动作", map[string]string{"start": "开机", "stop": "停机"}[action])), Fields: map[string]string{"instance_id": a.InstanceID, "action": action, "region": a.RegionID}})
 	s.json(w, 200, map[string]any{"success": true})
 }
 func (s *Server) deleteInstance(w http.ResponseWriter, data map[string]any) {
@@ -1391,7 +1406,7 @@ func (s *Server) deleteInstance(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 500, "释放任务入队失败")
 		return
 	}
-	s.dispatchEvent(rctx(), notify.Event{Title: "实例释放已提交", Summary: "实例已进入后台释放队列。", AccountID: accountDisplay(*a), Text: fmt.Sprintf("【ECS 控制台】实例释放已提交\n实例: %s\n实例 ID: %s\n区域: %s\n后台队列会继续处理 ECS、EIP 和 DDNS 清理。", accountDisplay(*a), a.InstanceID, a.RegionID), Fields: map[string]string{"instance_id": a.InstanceID, "region": a.RegionID, "action": "release"}})
+	s.dispatchEvent(rctx(), notify.Event{Title: "实例释放已提交", Summary: "实例已进入后台释放队列。", AccountID: accountDisplay(*a), Lines: append(notify.InstanceLines(accountDisplay(*a), a.InstanceID, a.RegionID), notify.L("说明", "后台队列会继续处理 ECS、EIP 和 DDNS 清理。")), Fields: map[string]string{"instance_id": a.InstanceID, "region": a.RegionID, "action": "release"}})
 	s.json(w, 202, map[string]any{"success": true, "queued": true, "jobId": jobID})
 }
 
@@ -1736,15 +1751,12 @@ func (s *Server) resolveMaskedAccountSecret(account map[string]any, accessKey, r
 
 func (s *Server) testNotification(w http.ResponseWriter, action string, data map[string]any) {
 	ctx := rctx()
+	testEvent := notify.Event{Title: "测试通知", Summary: "通知通道测试成功", Lines: []notify.Line{notify.L("说明", "收到这条消息说明通知通道配置正确。")}, Time: time.Now(), Fields: map[string]string{"event": "test"}}
 	var err error
 	switch action {
 	case "send_test_webhook":
 		cfg, _ := data["webhook"].(map[string]any)
-		headers := map[string]string{}
-		if raw := stringValue(cfg["headers"]); raw != "" {
-			_ = json.Unmarshal([]byte(raw), &headers)
-		}
-		err = notify.Webhook(ctx, stringValue(cfg["url"]), stringValue(cfg["method"]), stringValue(cfg["request_type"]), headers, map[string]any{"event": "test", "message": "ECS 控制台测试通知"})
+		err = notify.WebhookEvent(ctx, notify.EventConfig{WebhookURL: stringValue(cfg["url"]), WebhookMethod: stringValue(cfg["method"]), WebhookType: stringValue(cfg["request_type"]), WebhookHeaders: stringValue(cfg["headers"]), WebhookBody: stringValue(cfg["body"])}, testEvent)
 	case "send_test_telegram":
 		cfg, _ := data["telegram"].(map[string]any)
 		token := stringValue(cfg["token"])
@@ -1762,7 +1774,7 @@ func (s *Server) testNotification(w http.ResponseWriter, action string, data map
 		if clientErr != nil {
 			err = clientErr
 		} else {
-			err = client.SendMessage(ctx, stringValue(cfg["chat_id"]), "ECS 控制台测试消息", nil)
+			err = client.SendMessage(ctx, stringValue(cfg["chat_id"]), testEvent.Text(), nil)
 		}
 	case "send_test_email":
 		settings := s.Store.Settings()
@@ -1771,7 +1783,7 @@ func (s *Server) testNotification(w http.ResponseWriter, action string, data map
 		if to == "" {
 			to = settings["notify_email"]
 		}
-		err = notify.Email(ctx, settings["notify_host"], numberString(settings["notify_port"], 465), settings["notify_username"], password, settings["notify_username"], to, "ECS 控制台测试消息", "通知通道测试成功。", settings["notify_secure"])
+		err = notify.Email(ctx, settings["notify_host"], numberString(settings["notify_port"], 465), settings["notify_username"], password, settings["notify_username"], to, notify.Heading(testEvent.Title), testEvent.Text(), settings["notify_secure"])
 	}
 	if err != nil {
 		s.json(w, 200, map[string]any{"success": false, "message": err.Error()})
@@ -2013,6 +2025,30 @@ func containsMapValue(items []map[string]any, expected string, keys ...string) b
 		}
 	}
 	return false
+}
+
+// smallDiskCategory reports whether a disk type accepts a system disk under
+// 20 GB: ESSD when created as PL0, and ESSD AutoPL.
+func smallDiskCategory(category string) bool {
+	return category == "cloud_essd" || category == "cloud_auto"
+}
+
+func firstSmallDiskOption(options []map[string]any) map[string]any {
+	for _, want := range []string{"cloud_essd", "cloud_auto"} {
+		for _, option := range options {
+			if stringValue(option["value"]) == want {
+				return option
+			}
+		}
+	}
+	return nil
+}
+
+func diskCategoryName(option map[string]any) string {
+	if label := stringValue(option["label"]); label != "" {
+		return label
+	}
+	return stringValue(option["value"])
 }
 
 func selectDiskOption(options []map[string]any, requested string) map[string]any {
