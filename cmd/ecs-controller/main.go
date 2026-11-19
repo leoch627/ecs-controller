@@ -49,6 +49,7 @@ func main() {
 	go w.Run(ctx)
 	go w.Monitor(ctx, time.Duration(numberEnv("ECS_MONITOR_INTERVAL", 60))*time.Second)
 	go w.TelegramControl(ctx)
+	go srv.RunIPWatch(ctx)
 
 	addr := env("ECS_HTTP_ADDR", ":8080")
 	httpServer := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}}

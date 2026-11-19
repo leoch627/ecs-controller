@@ -21,6 +21,10 @@ const (
 	ipCheckDefaultPort     = 22
 	ipCheckDefaultMaxSwaps = 5
 	ipCheckSwapLimit       = 10
+	// ipCheckDefaultInterval is how often, in minutes, running instances are
+	// checked from mainland China; 0 turns the scheduled check off.
+	ipCheckDefaultInterval = 20
+	ipCheckIntervalLimit   = 1440
 )
 
 var (
@@ -44,6 +48,8 @@ type ipCheckSettings struct {
 	Token    string
 	Port     int
 	MaxSwaps int
+	// Interval is the scheduled check's period in minutes; 0 is off.
+	Interval int
 	HTTP     *http.Client
 }
 
@@ -60,6 +66,7 @@ func (s *Server) ipCheckSettings() ipCheckSettings {
 		Token:    token,
 		Port:     clampInt(s.Store.GetSetting("ipcheck_port", ""), ipCheckDefaultPort, 1, 65535),
 		MaxSwaps: clampInt(s.Store.GetSetting("ipcheck_max_swaps", ""), ipCheckDefaultMaxSwaps, 1, ipCheckSwapLimit),
+		Interval: clampInt(s.Store.GetSetting("ipcheck_auto_interval", ""), ipCheckDefaultInterval, 0, ipCheckIntervalLimit),
 	}
 }
 
@@ -73,7 +80,7 @@ func clampInt(raw string, fallback, low, high int) int {
 
 func (s *Server) ipCheckConfig() map[string]any {
 	cfg := s.ipCheckSettings()
-	return map[string]any{"probe_url": cfg.ProbeURL, "probe_token": masked(s.Store.GetSetting("ipcheck_probe_token", "")), "port": cfg.Port, "max_swaps": cfg.MaxSwaps}
+	return map[string]any{"probe_url": cfg.ProbeURL, "probe_token": masked(s.Store.GetSetting("ipcheck_probe_token", "")), "port": cfg.Port, "max_swaps": cfg.MaxSwaps, "auto_interval": cfg.Interval}
 }
 
 func validProbeURL(raw string) error {
@@ -103,7 +110,11 @@ func (s *Server) saveIPCheckConfig(data map[string]any) error {
 	if maxSwaps < 1 || maxSwaps > ipCheckSwapLimit {
 		return fmt.Errorf("最多更换次数必须在 1 到 %d 之间", ipCheckSwapLimit)
 	}
-	for key, value := range map[string]string{"ipcheck_probe_url": probeURL, "ipcheck_port": strconv.Itoa(port), "ipcheck_max_swaps": strconv.Itoa(maxSwaps)} {
+	interval := int(number(data["auto_interval"], ipCheckDefaultInterval))
+	if interval < 0 || interval > ipCheckIntervalLimit {
+		return fmt.Errorf("定时检测间隔必须在 0 到 %d 分钟之间", ipCheckIntervalLimit)
+	}
+	for key, value := range map[string]string{"ipcheck_probe_url": probeURL, "ipcheck_port": strconv.Itoa(port), "ipcheck_max_swaps": strconv.Itoa(maxSwaps), "ipcheck_auto_interval": strconv.Itoa(interval)} {
 		if err := s.Store.SetSetting(key, value); err != nil {
 			return err
 		}
