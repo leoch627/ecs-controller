@@ -32,14 +32,9 @@ func (s *Server) dnsConfig() map[string]any {
 		}
 		credentials[info.ID] = values
 	}
-	poolRules := make([]dns.Rule, 0)
-	for _, rule := range settings.EffectiveRules() {
-		if rule.Kind == "pool" {
-			poolRules = append(poolRules, rule)
-		}
-	}
+	rules := append([]dns.Rule{}, settings.EffectiveRules()...)
 	return map[string]any{
-		"rules":           poolRules,
+		"rules":           rules,
 		"cleanup_enabled": settings.CleanupEnabled,
 		"provider":        settings.Provider,
 		"domain":          settings.Domain,
@@ -55,9 +50,11 @@ func (s *Server) saveDNSConfig(ddns map[string]any) error {
 	previous := dns.LoadSettings(s.Store.GetSetting, s.Store.OpenSecret)
 	values := map[string]string{
 		"ddns_enabled": "0", "dns_cleanup_enabled": bool01(ddns["cleanup_enabled"]),
-		"ddns_provider":  dns.NormalizeID(stringValue(ddns["provider"])),
-		"ddns_domain":    dns.NormalizeDomain(stringValue(ddns["domain"])),
-		"ddns_pool_name": dns.NormalizeDomain(stringValue(ddns["pool_name"])),
+		// Let the next monitor pass write every machine's own record.
+		"last_ddns_reconcile": "0",
+		"ddns_provider":       dns.NormalizeID(stringValue(ddns["provider"])),
+		"ddns_domain":         dns.NormalizeDomain(stringValue(ddns["domain"])),
+		"ddns_pool_name":      dns.NormalizeDomain(stringValue(ddns["pool_name"])),
 	}
 	if raw, exists := ddns["rules"]; exists {
 		encoded, err := json.Marshal(raw)
@@ -70,11 +67,6 @@ func (s *Server) saveDNSConfig(ddns map[string]any) error {
 		}
 		if err := json.Unmarshal(encoded, &rules); err != nil {
 			return fmt.Errorf("解析规则格式无效: %w", err)
-		}
-		for _, rule := range rules {
-			if rule.Kind != "pool" {
-				return fmt.Errorf("仅支持负载均衡解析规则")
-			}
 		}
 		if err := dns.ValidateRules(rules); err != nil {
 			return err
@@ -139,7 +131,7 @@ func (s *Server) saveDNSConfig(ddns map[string]any) error {
 	names, keys := map[string]bool{}, map[string]bool{}
 	for _, binding := range bindings {
 		if names[binding.Name] {
-			return fmt.Errorf("负载均衡域名 %s 不能重复", binding.Name)
+			return fmt.Errorf("解析名称 %s 重复，负载均衡名称不能和单机解析名称相同", binding.Name)
 		}
 		names[binding.Name], keys[binding.Key()] = true, true
 	}

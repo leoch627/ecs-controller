@@ -177,3 +177,9 @@ func shortHash(value string) string {
 	hash := sha1.Sum([]byte(value))
 	return hex.EncodeToString(hash[:])[:8]
 }
+
+// InstanceDNSName is the full name the instance's own record uses under
+// domain: the user's chosen name if any, otherwise the automatic one.
+func (s *Store) InstanceDNSName(account app.Account, accounts []app.Account, domain string) string {
+	return s.DDNSNameForDomain(account, accounts, s.CustomDNSName(account), domain)
+}

@@ -29,11 +29,7 @@ func (s *Store) DNSBindings(settings dns.Settings, accounts []app.Account) []DNS
 	}
 	for _, account := range accounts {
 		if rule, ok := settings.InstanceRule(account); ok {
-			// A user-chosen hostname is not an automatically generated alias.
-			if s.CustomDNSName(account) != "" {
-				continue
-			}
-			name := s.DDNSNameForDomain(account, accounts, "", rule.Domain)
+			name := s.DDNSNameForDomain(account, accounts, s.CustomDNSName(account), rule.Domain)
 			result = append(result, DNSBinding{rule, name})
 		}
 	}
@@ -67,44 +63,49 @@ func (s *Store) SaveDNSSettings(values map[string]string, retired []DNSBinding) 
 	return tx.Commit()
 }
 
-// retireInstanceDNS keeps the old bindings long enough to delete their records
-// after upgrade. Only the saved pool rules are used for future synchronization.
-func (s *Store) retireInstanceDNS() error {
-	settings := dns.LoadSettings(s.GetSetting, nil)
-	var legacy []dns.Rule
-	pools := make([]dns.Rule, 0)
-	for _, rule := range settings.EffectiveRules() {
-		if rule.Kind == "instance" && (rule.Enabled || settings.RulesConfigured) {
-			legacy = append(legacy, rule)
-		}
-		if rule.Kind == "pool" {
-			pools = append(pools, rule)
-		}
-	}
-	if len(legacy) == 0 {
+// restoreInstanceDNS undoes an earlier migration that retired the per-machine
+// rules into ddns_retired_instance_rules: those rules go back into the active
+// list so each machine's own A record follows its IP again.
+func (s *Store) restoreInstanceDNS() error {
+	raw := s.GetSetting("ddns_retired_instance_rules", "")
+	if raw == "" {
 		return nil
 	}
-	accounts, err := s.LoadAccounts(true)
+	var retired []dns.Rule
+	if err := json.Unmarshal([]byte(raw), &retired); err != nil || len(retired) == 0 {
+		_, err = s.DB.Exec(`DELETE FROM settings WHERE key='ddns_retired_instance_rules'`)
+		return err
+	}
+	restored := map[string]bool{}
+	for _, rule := range retired {
+		restored[rule.ID] = rule.Kind == "instance"
+	}
+	// The retired copy wins over a same-ID rule, which that migration disabled.
+	rules := []dns.Rule{}
+	for _, rule := range dns.LoadSettings(s.GetSetting, nil).EffectiveRules() {
+		if !restored[rule.ID] {
+			rules = append(rules, rule)
+		}
+	}
+	for _, rule := range retired {
+		if rule.Kind == "instance" {
+			rules = append(rules, rule)
+		}
+	}
+	encoded, err := json.Marshal(rules)
 	if err != nil {
 		return err
 	}
-	var retired []DNSBinding
-	for _, binding := range s.DNSBindings(settings, accounts) {
-		if binding.Rule.Kind == "instance" {
-			retired = append(retired, binding)
-		}
-	}
-	oldRules, err := json.Marshal(legacy)
+	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
-	values := map[string]string{"ddns_enabled": "0", "ddns_retired_instance_rules": string(oldRules)}
-	if settings.RulesConfigured {
-		raw, err := json.Marshal(pools)
-		if err != nil {
-			return err
-		}
-		values["ddns_rules"] = string(raw)
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO settings(key,value) VALUES('ddns_rules',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, string(encoded)); err != nil {
+		return err
 	}
-	return s.SaveDNSSettings(values, retired)
+	if _, err := tx.Exec(`DELETE FROM settings WHERE key='ddns_retired_instance_rules'`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

@@ -98,9 +98,9 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := s.retireInstanceDNS(); err != nil {
+	if err := s.restoreInstanceDNS(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("retire instance DNS: %w", err)
+		return nil, fmt.Errorf("restore instance DNS: %w", err)
 	}
 	return s, nil
 }

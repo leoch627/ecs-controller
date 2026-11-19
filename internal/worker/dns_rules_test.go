@@ -163,101 +163,55 @@ func TestDeadIPCleanupOnlyUsesMatchingRuleDomains(t *testing.T) {
 	}
 }
 
-func TestUpgradeRetiresInstanceRecordsAndReconcilesTheLegacyPool(t *testing.T) {
-	for _, explicit := range []bool{false, true} {
-		name := "legacy settings"
-		if explicit {
-			name = "explicit rules"
+func TestUpgradeRestoresRetiredInstanceRules(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.Seal("fake-token")
+	retired, _ := json.Marshal([]dns.Rule{{ID: "legacy-instance", Enabled: true, Kind: "instance", Provider: "cloudflare", Domain: "example.com", Scope: dns.MachineScope{Mode: "all"}}})
+	for key, value := range map[string]string{
+		"ddns_enabled": "0", "ddns_provider": "cloudflare", "ddns_domain": "example.com", "ddns_cf_token": token,
+		"ddns_retired_instance_rules": string(retired),
+	} {
+		if err := s.SetSetting(key, value); err != nil {
+			t.Fatal(err)
 		}
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			s, err := store.Open(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = s.Close() }()
-			for key, value := range map[string]string{
-				"ddns_enabled": "1", "ddns_provider": "cloudflare", "ddns_domain": "example.com",
-				"ddns_cf_token": "fake-token", "ddns_pool_name": "loadbalance",
-			} {
-				if err := s.SetSetting(key, value); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if explicit {
-				instance := rule("singles", "instance", "example.com", "all")
-				pool := rule("pool", "pool", "example.com", "aliyun")
-				saveRules(t, s, instance, pool)
-			}
-			ali := app.Account{ID: 1, AccessKeyID: "ali", RegionID: "cn-test", SiteType: "international", Remark: "ali", InstanceID: "i-ali", InstanceStatus: "Running", PublicIP: "47.1.1.1"}
-			aws := app.Account{ID: 2, AccessKeyID: "aws", RegionID: "ap-northeast-1", SiteType: "aws", Remark: "aws", InstanceName: "tokyo", InstanceID: "i-aws", InstanceStatus: "Running", PublicIP: "43.206.50.226"}
-			for _, a := range []app.Account{ali, aws} {
-				if err := s.UpsertAccount(a); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := s.SetCustomDNSName(aws, "tokyo-custom"); err != nil {
-				t.Fatal(err)
-			}
-			gone := app.Account{AccessKeyID: "aws", RegionID: "other", SiteType: "aws", Remark: "aws", InstanceName: "gone", InstanceID: "i-gone"}
-			if err := s.EnqueueJob("pending-from-old-version", "delete_ddns", "gone", map[string]any{"account": gone}); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.Close(); err != nil {
-				t.Fatal(err)
-			}
-			upgraded, err := store.Open(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			s = upgraded
-			if s.GetSetting("ddns_enabled", "1") != "0" {
-				t.Fatal("legacy per-instance DNS was not disabled")
-			}
-			cf := &fakeCloudflare{records: map[string]string{
-				"ali": "ali.example.com 47.1.1.1", "aws": "tokyo-custom.example.com 43.206.50.226",
-				"gone": "aws-gone.example.com 43.199.143.244", "manual": "manual.example.com 43.206.50.226",
-				"valid-pool": "loadbalance.example.com 47.1.1.1", "aws-pool": "loadbalance.example.com 43.206.50.226",
-				"old-pool": "loadbalance.example.com 47.239.111.137",
-			}}
-			w := &Worker{Store: s, DNSClient: cf.client()}
-			ctx := context.Background()
-			for _, kind := range []string{"delete_ddns", "dns_rule_cleanup"} {
-				job, err := s.ClaimJob(time.Minute)
-				if err != nil || job == nil || job.Kind != kind {
-					t.Fatalf("expected %s job, got %+v, %v", kind, job, err)
-				}
-				if err := w.execute(ctx, job); err != nil {
-					t.Fatal(err)
-				}
-				if err := s.FinishJob(job.JobID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			w.SyncAccountDNS(ctx, aws.ID)
-			for _, host := range []string{"ali.example.com", "aws-tokyo.example.com", "aws-gone.example.com"} {
-				if got := poolRecords(cf, host); got != "" {
-					t.Fatalf("retired hostname %s still has A records: %s", host, got)
-				}
-			}
-			if got := poolRecords(cf, "loadbalance.example.com"); got != "47.1.1.1" {
-				t.Fatalf("pool contains stale addresses: %s", got)
-			}
-			if got := poolRecords(cf, "tokyo-custom.example.com"); got != "43.206.50.226" {
-				t.Fatalf("explicit AWS API hostname changed: %s", got)
-			}
-			// A cleanup queued by the earlier version must also preserve it.
-			old := rule("singles", "instance", "example.com", "all")
-			payload, _ := json.Marshal([]store.DNSBinding{{Rule: old, Name: "tokyo-custom.example.com"}})
-			if err := w.dnsRuleCleanupJob(ctx, &store.Job{Payload: string(payload)}); err != nil {
-				t.Fatal(err)
-			}
-			if got := poolRecords(cf, "tokyo-custom.example.com"); got != "43.206.50.226" {
-				t.Fatalf("old job deleted the explicit hostname: %s", got)
-			}
-			if got := poolRecords(cf, "manual.example.com"); got != "43.206.50.226" {
-				t.Fatalf("unrelated record changed: %s", got)
-			}
-		})
+	}
+	saveRules(t, s, rule("legacy-pool", "pool", "example.com", "aliyun"))
+	aws := app.Account{ID: 2, AccessKeyID: "aws", RegionID: "ap-northeast-1", SiteType: "aws", Remark: "aws", InstanceName: "tokyo", InstanceID: "i-aws", InstanceStatus: "Running", PublicIP: "13.193.97.141"}
+	if err := s.UpsertAccount(aws); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCustomDNSName(aws, "api-hnd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if s, err = store.Open(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if s.GetSetting("ddns_retired_instance_rules", "") != "" {
+		t.Fatal("retired rules were not consumed")
+	}
+	settings := dns.LoadSettings(s.GetSetting, s.OpenSecret)
+	kinds := map[string]string{}
+	for _, r := range settings.EffectiveRules() {
+		kinds[r.ID] = r.Kind
+	}
+	if kinds["legacy-pool"] != "pool" || kinds["legacy-instance"] != "instance" {
+		t.Fatalf("rules after upgrade: %+v", settings.EffectiveRules())
+	}
+	cf := &fakeCloudflare{records: map[string]string{"aws": "api-hnd.example.com 43.206.50.226"}}
+	w := &Worker{Store: s, DNSClient: cf.client()}
+	w.SyncAccountDNS(context.Background(), aws.ID)
+	if got := poolRecords(cf, "api-hnd.example.com"); got != "13.193.97.141" {
+		t.Fatalf("custom AWS name did not follow the new IP: %s", got)
+	}
+	if got := poolRecords(cf, "loadbalance.example.com"); got != "" {
+		t.Fatalf("AWS machine joined the Alibaba Cloud pool: %s", got)
 	}
 }

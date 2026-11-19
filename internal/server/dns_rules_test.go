@@ -39,11 +39,31 @@ func TestDNSRulesRoundTripAndRetirementAreAtomic(t *testing.T) {
 	}
 }
 
-func TestDNSRulesRejectInstanceRulesAndDuplicatePools(t *testing.T) {
-	srv, _ := newDNSRulesServer(t)
+func TestDNSRulesAcceptInstanceRulesAndRejectDuplicateNames(t *testing.T) {
+	srv, st := newDNSRulesServer(t)
 	instance := dns.Rule{ID: "one", Enabled: true, Kind: "instance", Provider: "cloudflare", Domain: "example.com", Scope: dns.MachineScope{Mode: "aws"}}
-	if err := srv.saveDNSConfig(map[string]any{"rules": []dns.Rule{instance}}); err == nil {
-		t.Fatal("single-instance rule accepted")
+	if err := srv.saveDNSConfig(map[string]any{"rules": []dns.Rule{instance}}); err != nil {
+		t.Fatalf("single-instance rule rejected: %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	srv.status(recorder)
+	var body struct {
+		Data       []map[string]any `json:"data"`
+		DDNSActive bool             `json:"ddns_active"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || !body.DDNSActive || len(body.Data) != 2 {
+		t.Fatalf("status: %+v, %v", body, err)
+	}
+	for _, item := range body.Data {
+		if name, _ := item["dnsName"].(string); !strings.HasSuffix(name, ".example.com") {
+			t.Fatalf("instance DNS name missing: %v", item)
+		}
+	}
+	accounts, _ := st.LoadAccounts(false)
+	taken := st.InstanceDNSName(accounts[0], accounts, "example.com")
+	clash := dns.Rule{ID: "pool", Enabled: true, Kind: "pool", Provider: "cloudflare", Domain: "example.com", Name: strings.TrimSuffix(taken, ".example.com"), Scope: dns.MachineScope{Mode: "aws"}}
+	if err := srv.saveDNSConfig(map[string]any{"rules": []dns.Rule{instance, clash}}); err == nil {
+		t.Fatal("pool name equal to an instance name accepted")
 	}
 	pool := instance
 	pool.ID, pool.Kind, pool.Name = "pool", "pool", "loadbalance"
@@ -54,7 +74,7 @@ func TestDNSRulesRejectInstanceRulesAndDuplicatePools(t *testing.T) {
 	}
 }
 
-func TestStatusExposesPoolSelectorWithoutInstanceDNSNames(t *testing.T) {
+func TestStatusOmitsInstanceDNSNamesWithoutInstanceRule(t *testing.T) {
 	srv, st := newDNSRulesServer(t)
 	accounts, _ := st.LoadAccounts(false)
 	rule := dns.Rule{ID: "one", Enabled: true, Kind: "pool", Provider: "cloudflare", Domain: "example.com", Name: "loadbalance", Scope: dns.MachineScope{Mode: "instances", InstanceKeys: []string{dns.InstanceKey(accounts[0])}}}

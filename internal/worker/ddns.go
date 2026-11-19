@@ -24,9 +24,74 @@ func (w *Worker) dnsService(settings dns.Settings) (*dns.Service, error) {
 	return dns.NewService(settings, w.DNSClient)
 }
 
-// SyncAccountDNS updates all affected pool memberships after a public IP swap.
-func (w *Worker) SyncAccountDNS(ctx context.Context, _ int64) {
+// SyncAccountDNS points the instance's own record at its new public IP and
+// updates the pools right after an IP swap, instead of waiting for the
+// monitor. A failed instance update is retried on the monitor's next pass.
+func (w *Worker) SyncAccountDNS(ctx context.Context, accountID int64) {
+	if account, err := w.Store.Account(accountID, false); err == nil {
+		if !w.syncInstanceDNS(ctx, *account) {
+			_ = w.Store.SetSetting("last_ddns_reconcile", "0")
+		}
+	}
 	w.syncDDNSPool(ctx, time.Now())
+}
+
+// syncInstanceDNS points the instance's own name (from the first enabled
+// single-machine rule that matches it) at its public IP. It returns false
+// only when the provider call failed, so the caller can retry.
+func (w *Worker) syncInstanceDNS(ctx context.Context, account app.Account) bool {
+	w.Store.DNSConfigMu.Lock()
+	defer w.Store.DNSConfigMu.Unlock()
+	settings := w.dnsSettings()
+	rule, ok := settings.InstanceRule(account)
+	if !ok || account.CloudPresence == "missing" {
+		return true
+	}
+	// An expired instance's IP is being removed from DNS; writing it back
+	// here would undo the cleanup.
+	if w.Store.InstanceExpiry(account.InstanceID).Expired(time.Now()) {
+		return true
+	}
+	address := store.AccountPublicIP(account)
+	if !dns.IsPublicIPv4(address) {
+		return true
+	}
+	accounts, err := w.Store.LoadAccounts(false)
+	if err != nil {
+		return false
+	}
+	name := w.Store.InstanceDNSName(account, accounts, rule.Domain)
+	service, err := w.dnsService(settings.ForRule(rule))
+	if err != nil {
+		w.Store.AddLog("warning", "单机解析同步失败 ["+name+"]: "+err.Error())
+		return false
+	}
+	action, err := service.SyncA(ctx, name, address)
+	if err != nil {
+		w.Store.AddLog("warning", service.Label()+" 单机解析同步失败 ["+name+"]: "+err.Error())
+		return false
+	}
+	if action != "unchanged" {
+		w.Store.AddLog("info", fmt.Sprintf("单机解析已同步 [%s] %s -> %s", accountLabel(account), name, address))
+	}
+	return true
+}
+
+// syncAllInstanceDNS rewrites every instance's own record, undoing manual
+// edits and retrying earlier failures.
+func (w *Worker) syncAllInstanceDNS(ctx context.Context) bool {
+	accounts, err := w.Store.LoadAccounts(false)
+	if err != nil {
+		return false
+	}
+	ok := true
+	for _, account := range accounts {
+		if ctx.Err() != nil {
+			return false
+		}
+		ok = w.syncInstanceDNS(ctx, account) && ok
+	}
+	return ok
 }
 
 // syncDDNSPool reconciles each pool independently; one failing provider must
