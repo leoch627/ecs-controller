@@ -6,7 +6,7 @@ import (
 	"github.com/Kori1c/ecs-controller/internal/app"
 )
 
-func TestDDNSRecordNameGivesEveryAWSMachineItsOwnName(t *testing.T) {
+func TestLegacyInstanceDNSNameDerivation(t *testing.T) {
 	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -20,23 +20,23 @@ func TestDDNSRecordNameGivesEveryAWSMachineItsOwnName(t *testing.T) {
 	accounts := []app.Account{aws, aliyun}
 
 	// An AWS machine is named after itself even when it is alone in its account.
-	if got := s.DDNSRecordName(aws, accounts); got != "aws-tokyo-debian-1.example.com" {
+	if got := s.DDNSNameForDomain(aws, accounts, s.CustomDNSName(aws), "example.com"); got != "aws-tokyo-debian-1.example.com" {
 		t.Fatalf("aws name=%s", got)
 	}
 	// Alibaba Cloud keeps the existing scheme.
-	if got := s.DDNSRecordName(aliyun, accounts); got != "hk.example.com" {
+	if got := s.DDNSNameForDomain(aliyun, accounts, s.CustomDNSName(aliyun), "example.com"); got != "hk.example.com" {
 		t.Fatalf("aliyun name=%s", got)
 	}
 
 	if err := s.SetCustomDNSName(aws, "jp1"); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.DDNSRecordName(aws, accounts); got != "jp1.example.com" {
+	if got := s.DDNSNameForDomain(aws, accounts, s.CustomDNSName(aws), "example.com"); got != "jp1.example.com" {
 		t.Fatalf("custom name=%s", got)
 	}
 	// The cleanup payload carries only identity fields; the name must still resolve.
 	payload := app.Account{AccessKeyID: aws.AccessKeyID, RegionID: aws.RegionID, InstanceID: aws.InstanceID, SiteType: "aws"}
-	if got := s.DDNSRecordName(payload, nil); got != "jp1.example.com" {
+	if got := s.DDNSNameForDomain(payload, nil, s.CustomDNSName(payload), "example.com"); got != "jp1.example.com" {
 		t.Fatalf("payload name=%s", got)
 	}
 	if err := s.SetCustomDNSName(aws, ""); err != nil {

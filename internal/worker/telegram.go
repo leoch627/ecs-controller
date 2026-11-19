@@ -408,7 +408,7 @@ func (w *Worker) refreshTelegramAccount(ctx context.Context, id int64) error {
 	instance, err := client.DescribeInstance(ctx, a.RegionID, a.InstanceID)
 	if err != nil {
 		if cloud.IsNotFound(err) {
-			if purgeErr := w.purgeMissingAccount(ctx, *a); purgeErr != nil {
+			if purgeErr := w.purgeMissingAccount(*a); purgeErr != nil {
 				return purgeErr
 			}
 			return fmt.Errorf("云端实例不存在，已从面板移除")

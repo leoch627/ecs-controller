@@ -112,8 +112,9 @@ func (s *Server) saveIPCheckConfig(data map[string]any) error {
 }
 
 type ipCheckResult struct {
-	Status string
-	Detail string
+	Status  string
+	Detail  string
+	Refused bool
 }
 
 // checkIP decides whether ip is blocked from mainland China on the configured
@@ -142,9 +143,9 @@ func (s *Server) checkIP(ctx context.Context, cfg ipCheckSettings, ip string, se
 	reachable := func(response reach.CheckResponse) ipCheckResult {
 		detail := fmt.Sprintf("国内可以连上 %s，耗时 %d ms", target, response.LatencyMS)
 		if response.Refused {
-			detail = fmt.Sprintf("国内可以到达 %s（端口未监听，但 IP 没有被墙）", ip)
+			detail = fmt.Sprintf("国内能到达 %s，TCP 连接被拒绝", target)
 		}
-		return ipCheckResult{Status: ipCheckOK, Detail: detail}
+		return ipCheckResult{Status: ipCheckOK, Detail: detail, Refused: response.Refused}
 	}
 	if remote.Reachable {
 		return reachable(remote)
@@ -177,7 +178,7 @@ func (s *Server) saveIPCheck(accountID int64, ip string, result ipCheckResult) {
 }
 
 // checkInstanceIP runs the reachability check on an instance's current IP.
-func (s *Server) checkInstanceIP(w http.ResponseWriter, data map[string]any) {
+func (s *Server) checkInstanceIP(requestCtx context.Context, w http.ResponseWriter, data map[string]any) {
 	id := int64(number(data["accountId"], 0))
 	a, err := s.Store.Account(id, false)
 	if err != nil {
@@ -197,11 +198,14 @@ func (s *Server) checkInstanceIP(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 409, "这台实例正在更换公网 IP，请稍候")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	ctx, cancel := context.WithTimeout(requestCtx, 50*time.Second)
 	defer cancel()
 	result := s.checkIP(ctx, cfg, a.PublicIP, ipCheckManualSettle)
+	if requestCtx.Err() != nil {
+		return
+	}
 	s.saveIPCheck(id, a.PublicIP, result)
-	s.json(w, 200, map[string]any{"success": true, "message": result.Detail, "data": map[string]any{"ip": a.PublicIP, "status": result.Status, "detail": result.Detail, "checkedAt": time.Now().Unix()}})
+	s.json(w, 200, map[string]any{"success": true, "message": result.Detail, "data": map[string]any{"ip": a.PublicIP, "port": cfg.Port, "refused": result.Refused, "status": result.Status, "detail": result.Detail, "checkedAt": time.Now().Unix()}})
 }
 
 // testIPProbe checks the probe address and token being edited, before saving.

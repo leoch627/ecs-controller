@@ -12,6 +12,7 @@ import (
 
 	"github.com/Kori1c/ecs-controller/internal/app"
 	"github.com/Kori1c/ecs-controller/internal/cloud"
+	"github.com/Kori1c/ecs-controller/internal/dns"
 	"github.com/Kori1c/ecs-controller/internal/inventory"
 	"github.com/Kori1c/ecs-controller/internal/notify"
 	"github.com/Kori1c/ecs-controller/internal/store"
@@ -73,13 +74,6 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 				continue
 			}
 			w.Store.AddLog("heartbeat", fmt.Sprintf("监控心跳正常：已检查 %d 个监控账号。", len(accounts)))
-			if w.ddnsEnabled() {
-				lastDDNS, _ := strconv.ParseInt(w.Store.GetSetting("last_ddns_reconcile", "0"), 10, 64)
-				if now.Unix()-lastDDNS >= 6*60*60 {
-					w.syncAllDDNS(ctx)
-					_ = w.Store.SetSetting("last_ddns_reconcile", strconv.FormatInt(now.Unix(), 10))
-				}
-			}
 			threshold, _ := strconv.ParseFloat(w.Store.GetSetting("traffic_threshold", "95"), 64)
 			if threshold <= 0 || threshold > 100 {
 				threshold = 95
@@ -126,7 +120,7 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 						continue
 					}
 					if cloud.IsNotFound(describeErr) {
-						if purgeErr := w.purgeMissingAccount(ctx, account); purgeErr != nil {
+						if purgeErr := w.purgeMissingAccount(account); purgeErr != nil {
 							w.Store.AddLog("warning", "清理云端不存在实例失败: "+purgeErr.Error())
 						}
 						continue
@@ -221,7 +215,6 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 					w.Store.AddLog("error", "保存监控状态失败: "+err.Error())
 				}
 				if account.PublicIP != "" && account.PublicIP != oldPublicIP {
-					w.syncDDNSAccount(ctx, account)
 					w.dispatchEvent(ctx, notify.Event{Title: "公网 IP 已变化", Summary: fmt.Sprintf("%s 公网 IP 已从 %s 变为 %s", accountLabel(account), oldPublicIP, account.PublicIP), AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】公网 IP 已变化\n实例: %s\n实例 ID: %s\n旧 IP: %s\n新 IP: %s\n时间: %s", accountLabel(account), account.InstanceID, oldPublicIP, account.PublicIP, time.Now().Format("2006-01-02 15:04:05")), Fields: map[string]string{"old_ip": oldPublicIP, "new_ip": account.PublicIP, "instance_id": account.InstanceID}})
 				}
 			}
@@ -298,24 +291,12 @@ func (w *Worker) cleanupMissingReleaseFailed(account app.Account, describeErr er
 	return removed, err
 }
 
-func (w *Worker) purgeMissingAccount(ctx context.Context, account app.Account) error {
-	beforeAccounts, err := w.Store.LoadAccounts(false)
-	if err != nil {
-		return err
-	}
+func (w *Worker) purgeMissingAccount(account app.Account) error {
 	if err := w.Store.DeleteInstanceData(account.ID); err != nil {
 		return err
 	}
 	if _, err := w.Store.EnqueueAccountDNSCleanup(account, "vanished"); err != nil {
 		w.Store.AddLog("warning", "实例已消失，但解析清理任务入队失败: "+err.Error())
-	}
-	if w.ddnsEnabled() {
-		jobID := fmt.Sprintf("missing-ddns-%s-%d", account.InstanceID, time.Now().UnixNano())
-		payload := map[string]any{"account": ddnsPayloadAccount(account), "before": ddnsPayloadAccounts(beforeAccounts)}
-		if err := w.Store.EnqueueJob(jobID, "delete_ddns", strconv.FormatInt(account.ID, 10), payload); err != nil {
-			return fmt.Errorf("enqueue DDNS cleanup: %w", err)
-		}
-		_ = w.Store.SetSetting("last_ddns_reconcile", "0")
 	}
 	w.Store.AddLog("info", "已彻底清理云端不存在的实例记录")
 	return nil
@@ -643,15 +624,24 @@ func (w *Worker) Run(ctx context.Context) {
 		}
 		if err := w.execute(ctx, job); err != nil {
 			w.Log.Printf("job %s: %v", job.JobID, err)
+			if job.Kind == "dns_rule_cleanup" || job.Kind == "delete_ddns" {
+				w.Store.AddLog("warning", "旧解析清理失败: "+err.Error())
+			}
 			maxAttempts := 5
+			delay := retryDelay(job.Attempts)
 			if job.Kind == "delete_instance" {
 				maxAttempts = 20
 			}
 			if job.Kind == store.DNSCleanupKind {
 				maxAttempts = 10
 			}
+			if job.Kind == "dns_rule_cleanup" || job.Kind == "delete_ddns" {
+				maxAttempts = 10
+				// A moved pool may still be waiting out its provider backoff.
+				delay = poolRetryDelay
+			}
 			if job.Attempts < maxAttempts {
-				_ = w.Store.RetryJob(job.JobID, retryDelay(job.Attempts), err.Error())
+				_ = w.Store.RetryJob(job.JobID, delay, err.Error())
 			} else {
 				if job.Kind == "delete_instance" {
 					if id, parseErr := strconv.ParseInt(job.EntityKey, 10, 64); parseErr == nil {
@@ -677,6 +667,8 @@ func (w *Worker) execute(ctx context.Context, job *store.Job) error {
 		return w.deleteInstance(ctx, job)
 	case "delete_ddns":
 		return w.deleteDDNSJob(ctx, job)
+	case "dns_rule_cleanup":
+		return w.dnsRuleCleanupJob(ctx, job)
 	case store.DNSCleanupKind:
 		return w.dnsCleanupJob(ctx, job)
 	default:
@@ -698,7 +690,21 @@ func (w *Worker) deleteDDNSJob(ctx context.Context, job *store.Job) error {
 	if len(payload.Before) == 0 {
 		payload.Before = []app.Account{payload.Account}
 	}
-	return w.deleteDDNSAccount(ctx, payload.Account, payload.Before)
+	// Old installations may already have queued cleanup for removed instances.
+	w.Store.DNSConfigMu.Lock()
+	defer w.Store.DNSConfigMu.Unlock()
+	settings := w.dnsSettings()
+	var oldRules []dns.Rule
+	if err := json.Unmarshal([]byte(w.Store.GetSetting("ddns_retired_instance_rules", "[]")), &oldRules); err != nil {
+		return err
+	}
+	for _, rule := range oldRules {
+		if rule.Enabled && rule.Scope.Matches(payload.Account) {
+			name := w.Store.DDNSNameForDomain(payload.Account, payload.Before, w.Store.CustomDNSName(payload.Account), rule.Domain)
+			return w.cleanupDNSBindings(ctx, settings, []store.DNSBinding{{Rule: rule, Name: name}})
+		}
+	}
+	return nil
 }
 
 func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
@@ -717,10 +723,6 @@ func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
 	if client == nil {
 		return fmt.Errorf("cloud client is not configured")
 	}
-	// Capture the pre-delete group membership. Multi-instance DDNS names use
-	// the group count, so recomputing after the row is marked deleted would
-	// derive a different record name and leave the old record behind.
-	beforeAccounts, _ := w.Store.LoadAccounts(false)
 	status := account.InstanceStatus
 	notFound := false
 	if status != "Stopped" && status != "Released" {
@@ -757,11 +759,6 @@ func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
 			return err
 		}
 	}
-	// Keep the local row in Releasing until the external DNS record is also
-	// gone, so a transient DNS provider failure remains retryable.
-	if err := w.deleteDDNSAccount(ctx, *account, beforeAccounts); err != nil {
-		return err
-	}
 	// The account row still holds the IP the instance had (including a managed
 	// EIP that was just released), so queue it before the row is removed.
 	if _, err := w.Store.EnqueueAccountDNSCleanup(*account, "released"); err != nil {
@@ -770,12 +767,8 @@ func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
 	if err := w.Store.PhysicallyDelete(id); err != nil {
 		return err
 	}
-	before := beforeAccounts
-	if len(before) == 0 {
-		before = []app.Account{*account}
-	}
-	w.syncAllDDNS(ctx)
-	w.dispatchEvent(ctx, notify.Event{Title: "实例已释放", Summary: "实例已从云端释放，本地记录和 DDNS 已清理。", AccountID: accountLabel(*account), Text: fmt.Sprintf("【ECS 控制台】实例已释放\n实例: %s\n实例 ID: %s\n区域: %s\n公网 IP: %s\n时间: %s", accountLabel(*account), account.InstanceID, account.RegionID, account.PublicIP, time.Now().Format("2006-01-02 15:04:05")), Fields: map[string]string{"instance_id": account.InstanceID, "region": account.RegionID, "public_ip": account.PublicIP}})
+	w.syncDDNSPool(ctx, time.Now())
+	w.dispatchEvent(ctx, notify.Event{Title: "实例已释放", Summary: "实例已从云端释放，本地记录已清理。", AccountID: accountLabel(*account), Text: fmt.Sprintf("【ECS 控制台】实例已释放\n实例: %s\n实例 ID: %s\n区域: %s\n公网 IP: %s\n时间: %s", accountLabel(*account), account.InstanceID, account.RegionID, account.PublicIP, time.Now().Format("2006-01-02 15:04:05")), Fields: map[string]string{"instance_id": account.InstanceID, "region": account.RegionID, "public_ip": account.PublicIP}})
 	w.Store.AddLog("info", "实例已异步释放: "+account.InstanceID)
 	return nil
 }
@@ -931,7 +924,7 @@ func (w *Worker) createECS(ctx context.Context, job *store.Job) (err error) {
 	if err = w.Store.UpsertAccount(a); err != nil {
 		return err
 	}
-	w.syncDDNSAccount(ctx, a)
+	w.syncDDNSPool(ctx, time.Now())
 	if customImage {
 		_ = w.Store.UpdateTask(task.TaskID, map[string]any{"step": "清理自定义镜像"})
 		w.cleanupCustomImage(ctx, client, task.RegionID, createdInstance, stringOr(payload, "imageId", ""))

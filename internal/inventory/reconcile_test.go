@@ -3,7 +3,6 @@ package inventory
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -105,7 +104,7 @@ func TestFailedInventoryDoesNotMarkInstancesMissing(t *testing.T) {
 	}
 }
 
-func TestInventoryPurgingQueuesOnlySanitizedDDNSCleanup(t *testing.T) {
+func TestInventoryPurgingDoesNotQueueStandaloneDNS(t *testing.T) {
 	st, group := newInventoryStore(t)
 	defer st.Close()
 	if err := st.SetSetting("ddns_enabled", "1"); err != nil {
@@ -119,11 +118,8 @@ func TestInventoryPurgingQueuesOnlySanitizedDDNSCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	job, err := st.ClaimJob(time.Minute)
-	if err != nil || job == nil || job.Kind != "delete_ddns" {
-		t.Fatalf("DDNS cleanup job=%#v err=%v", job, err)
-	}
-	if strings.Contains(job.Payload, "secret-value") || strings.Contains(job.Payload, "AccessKeySecret") {
-		t.Fatalf("DDNS cleanup payload contains credentials: %s", job.Payload)
+	if err != nil || job != nil {
+		t.Fatalf("unexpected legacy DNS cleanup job=%#v err=%v", job, err)
 	}
 }
 

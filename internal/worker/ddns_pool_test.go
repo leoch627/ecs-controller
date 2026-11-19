@@ -79,3 +79,35 @@ func TestDDNSPoolTracksRunningInstances(t *testing.T) {
 		t.Fatalf("pool records after stop=%s", got)
 	}
 }
+
+func TestPoolRepairsPartialSyncWhenMembershipReverts(t *testing.T) {
+	const name = "rr.example.com"
+	cf := &fakeCloudflare{records: map[string]string{"original": name + " 47.1.1.1"}}
+	w, s := newCleanupWorker(t, cf)
+	if err := s.SetSetting("ddns_pool_name", "rr"); err != nil {
+		t.Fatal(err)
+	}
+	account := app.Account{ID: 1, AccessKeyID: "ak", RegionID: "cn-test", InstanceID: "i-pool", InstanceStatus: "Running", PublicIP: "47.1.1.1"}
+	upsert := func(ip string) {
+		t.Helper()
+		account.PublicIP = ip
+		if err := s.UpsertAccount(account); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, now := context.Background(), time.Now()
+	upsert("47.1.1.1")
+	w.syncDDNSPool(ctx, now)
+	cf.failDeleteID = "original"
+	upsert("47.1.1.2")
+	w.syncDDNSPool(ctx, now.Add(time.Minute))
+	if got := poolRecords(cf, name); got != "47.1.1.1,47.1.1.2" {
+		t.Fatalf("expected partially updated pool, got %s", got)
+	}
+	cf.failDeleteID = ""
+	upsert("47.1.1.1")
+	w.syncDDNSPool(ctx, now.Add(2*time.Minute))
+	if got := poolRecords(cf, name); got != "47.1.1.1" {
+		t.Fatalf("stale IP survived a return to a previously cached set: %s", got)
+	}
+}

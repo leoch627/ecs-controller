@@ -28,6 +28,9 @@ type Store struct {
 	DB    *sql.DB
 	Key   [32]byte
 	keyMu sync.RWMutex
+
+	// DNSConfigMu serializes rule changes with reconciliation and name deletion.
+	DNSConfigMu sync.Mutex
 }
 
 var ErrAccountNotObservable = errors.New("account cannot be marked missing")
@@ -94,6 +97,10 @@ func Open(dataDir string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if err := s.retireInstanceDNS(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("retire instance DNS: %w", err)
 	}
 	return s, nil
 }

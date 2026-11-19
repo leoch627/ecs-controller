@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -31,8 +32,14 @@ func (s *Server) dnsConfig() map[string]any {
 		}
 		credentials[info.ID] = values
 	}
+	poolRules := make([]dns.Rule, 0)
+	for _, rule := range settings.EffectiveRules() {
+		if rule.Kind == "pool" {
+			poolRules = append(poolRules, rule)
+		}
+	}
 	return map[string]any{
-		"enabled":         settings.DDNSEnabled,
+		"rules":           poolRules,
 		"cleanup_enabled": settings.CleanupEnabled,
 		"provider":        settings.Provider,
 		"domain":          settings.Domain,
@@ -43,39 +50,106 @@ func (s *Server) dnsConfig() map[string]any {
 
 // saveDNSConfig stores the DNS section of save_config.
 func (s *Server) saveDNSConfig(ddns map[string]any) error {
-	_ = s.Store.SetSetting("ddns_enabled", bool01(ddns["enabled"]))
-	_ = s.Store.SetSetting("dns_cleanup_enabled", bool01(ddns["cleanup_enabled"]))
-	_ = s.Store.SetSetting("ddns_provider", dns.NormalizeID(stringValue(ddns["provider"])))
-	_ = s.Store.SetSetting("ddns_domain", dns.NormalizeDomain(stringValue(ddns["domain"])))
-	_ = s.Store.SetSetting("ddns_pool_name", dns.NormalizeDomain(stringValue(ddns["pool_name"])))
+	s.Store.DNSConfigMu.Lock()
+	defer s.Store.DNSConfigMu.Unlock()
+	previous := dns.LoadSettings(s.Store.GetSetting, s.Store.OpenSecret)
+	values := map[string]string{
+		"ddns_enabled": "0", "dns_cleanup_enabled": bool01(ddns["cleanup_enabled"]),
+		"ddns_provider":  dns.NormalizeID(stringValue(ddns["provider"])),
+		"ddns_domain":    dns.NormalizeDomain(stringValue(ddns["domain"])),
+		"ddns_pool_name": dns.NormalizeDomain(stringValue(ddns["pool_name"])),
+	}
+	if raw, exists := ddns["rules"]; exists {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return err
+		}
+		rules := []dns.Rule{}
+		if string(encoded) == "null" {
+			return fmt.Errorf("解析规则必须是列表，关闭全部规则请传空列表")
+		}
+		if err := json.Unmarshal(encoded, &rules); err != nil {
+			return fmt.Errorf("解析规则格式无效: %w", err)
+		}
+		for _, rule := range rules {
+			if rule.Kind != "pool" {
+				return fmt.Errorf("仅支持负载均衡解析规则")
+			}
+		}
+		if err := dns.ValidateRules(rules); err != nil {
+			return err
+		}
+		encoded, _ = json.Marshal(rules)
+		values["ddns_rules"] = string(encoded)
+	}
 	credentials, _ := ddns["credentials"].(map[string]any)
 	if credentials == nil {
 		credentials = map[string]any{}
 	}
-	// Older clients sent Cloudflare settings as Ddns.cloudflare.
 	if legacy, ok := ddns["cloudflare"].(map[string]any); ok && credentials["cloudflare"] == nil {
 		credentials["cloudflare"] = legacy
 	}
 	for _, info := range dns.Providers() {
-		values, ok := credentials[info.ID].(map[string]any)
+		fields, ok := credentials[info.ID].(map[string]any)
 		if !ok {
 			continue
 		}
 		for _, field := range info.Fields {
+			value, supplied := fields[field.Key]
+			if !supplied {
+				continue
+			}
 			key := dns.SettingKey(info.ID, field.Key)
 			switch field.Type {
 			case "secret":
-				if err := s.saveSecret(key, strings.TrimSpace(stringValue(values[field.Key]))); err != nil {
+				plain := strings.TrimSpace(stringValue(value))
+				if plain == "" || plain == "********" {
+					continue
+				}
+				sealed, err := s.Store.Seal(plain)
+				if err != nil {
 					return err
 				}
+				values[key] = sealed
 			case "switch":
-				_ = s.Store.SetSetting(key, bool01(values[field.Key]))
+				values[key] = bool01(value)
 			default:
-				_ = s.Store.SetSetting(key, strings.TrimSpace(stringValue(values[field.Key])))
+				values[key] = strings.TrimSpace(stringValue(value))
 			}
 		}
 	}
-	return nil
+	draft := dns.LoadSettings(func(key, fallback string) string {
+		if value, ok := values[key]; ok {
+			return value
+		}
+		return s.Store.GetSetting(key, fallback)
+	}, s.Store.OpenSecret)
+	accounts, err := s.Store.LoadAccounts(false)
+	if err != nil {
+		return err
+	}
+	if draft.RulesConfigured {
+		for _, rule := range draft.Rules {
+			if rule.Enabled && !draft.ForRule(rule).Configured() {
+				return fmt.Errorf("%s 的 %s 凭据没有填写完整", rule.Domain, dns.Lookup(rule.Provider).Label)
+			}
+		}
+	}
+	bindings := s.Store.DNSBindings(draft, accounts)
+	names, keys := map[string]bool{}, map[string]bool{}
+	for _, binding := range bindings {
+		if names[binding.Name] {
+			return fmt.Errorf("负载均衡域名 %s 不能重复", binding.Name)
+		}
+		names[binding.Name], keys[binding.Key()] = true, true
+	}
+	retired := []store.DNSBinding{}
+	for _, binding := range s.Store.DNSBindings(previous, accounts) {
+		if !keys[binding.Key()] {
+			retired = append(retired, binding)
+		}
+	}
+	return s.Store.SaveDNSSettings(values, retired)
 }
 
 // testDNS checks the form's (possibly unsaved) provider settings. Masked
@@ -104,6 +178,20 @@ func (s *Server) testDNS(w http.ResponseWriter, data map[string]any) {
 		}
 	}
 	settings.Credentials[info.ID] = cfg
+	if raw, ok := data["rule"]; ok {
+		encoded, _ := json.Marshal(raw)
+		var rule dns.Rule
+		if err := json.Unmarshal(encoded, &rule); err != nil {
+			s.error(w, 400, "解析规则格式无效")
+			return
+		}
+		rules := []dns.Rule{rule}
+		if err := dns.ValidateRules(rules); err != nil {
+			s.error(w, 400, err.Error())
+			return
+		}
+		settings = settings.ForRule(rules[0])
+	}
 
 	service, err := dns.NewService(settings, s.DNSClient)
 	if err != nil {
@@ -112,6 +200,15 @@ func (s *Server) testDNS(w http.ResponseWriter, data map[string]any) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+	if truthy(data["list_zones"]) {
+		zones, err := service.Zones(ctx)
+		if err != nil {
+			s.error(w, 400, err.Error())
+			return
+		}
+		s.json(w, 200, map[string]any{"success": true, "zones": zones})
+		return
+	}
 	message, err := service.Test(ctx)
 	if err != nil {
 		s.json(w, 200, map[string]any{"success": false, "message": err.Error()})

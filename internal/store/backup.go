@@ -71,6 +71,15 @@ func (s *Store) RestoreSnapshot(path string, encryptionKey [32]byte) error {
 		}
 	}
 
+	// Older snapshots may omit this table. Its names are needed to identify
+	// legacy custom records during the DNS migration.
+	var hasDNSNames int
+	if err := source.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dns_names'`).Scan(&hasDNSNames); err != nil {
+		return fmt.Errorf("check legacy DNS names: %w", err)
+	}
+
+	s.DNSConfigMu.Lock()
+	defer s.DNSConfigMu.Unlock()
 	if _, err := s.DB.Exec(`ATTACH DATABASE ? AS restore_source`, path); err != nil {
 		return fmt.Errorf("attach restore snapshot: %w", err)
 	}
@@ -97,6 +106,14 @@ func (s *Store) RestoreSnapshot(path string, encryptionKey [32]byte) error {
 			return rollback(err)
 		}
 	}
+	if _, err := tx.Exec(`DELETE FROM dns_names`); err != nil {
+		return rollback(err)
+	}
+	if hasDNSNames != 0 {
+		if _, err := tx.Exec(`INSERT INTO dns_names(instance_key,name) SELECT instance_key,name FROM restore_source.dns_names`); err != nil {
+			return rollback(err)
+		}
+	}
 	// Never revive sessions or an in-flight operation from an old backup.
 	for _, table := range []string{"sessions", "login_attempts", "passkey_challenges", "telegram_action_tokens", "jobs", "ecs_create_tasks", "telegram_bot_state"} {
 		if _, err := tx.Exec(`DELETE FROM ` + table); err != nil {
@@ -113,7 +130,7 @@ func (s *Store) RestoreSnapshot(path string, encryptionKey [32]byte) error {
 		return fmt.Errorf("detach restore snapshot: %w", err)
 	}
 	detached = true
-	return nil
+	return s.retireInstanceDNS()
 }
 
 // BackupTables returns a copy for manifest and compatibility checks outside the

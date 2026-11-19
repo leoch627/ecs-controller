@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Kori1c/ecs-controller/internal/app"
+	"github.com/Kori1c/ecs-controller/internal/dns"
 )
 
 // DNSCleanupKind is the job kind that removes a dead instance's IP from DNS.
@@ -17,10 +18,11 @@ const DNSCleanupKind = "dns_cleanup"
 
 // DNSCleanupPayload describes why an IP must leave DNS.
 type DNSCleanupPayload struct {
-	IP         string `json:"ip"`
-	InstanceID string `json:"instanceId"`
-	Label      string `json:"label"`
-	Reason     string `json:"reason"` // expired | vanished | released | ip_replaced
+	Rules      *[]dns.Rule `json:"rules,omitempty"`
+	IP         string      `json:"ip"`
+	InstanceID string      `json:"instanceId"`
+	Label      string      `json:"label"`
+	Reason     string      `json:"reason"` // expired | vanished | released | ip_replaced
 }
 
 // DNSCleanupReasonText is the user-facing explanation of a cleanup reason.
@@ -41,6 +43,22 @@ func DNSCleanupReasonText(reason string) string {
 // EnqueueDNSCleanup queues ip for removal from DNS when cleanup is switched on.
 // It reports whether a new job was created.
 func (s *Store) EnqueueDNSCleanup(ip, instanceID, label, reason string) (bool, error) {
+	var owner *app.Account
+	accounts, err := s.LoadAccounts(false)
+	if err != nil {
+		return false, err
+	}
+	for _, account := range accounts {
+		if account.InstanceID == instanceID {
+			a := account
+			owner = &a
+			break
+		}
+	}
+	return s.enqueueDNSCleanup(ip, instanceID, label, reason, owner)
+}
+
+func (s *Store) enqueueDNSCleanup(ip, instanceID, label, reason string, owner *app.Account) (bool, error) {
 	ip = strings.TrimSpace(ip)
 	if s.GetSetting("dns_cleanup_enabled", "0") != "1" || net.ParseIP(ip).To4() == nil {
 		return false, nil
@@ -53,6 +71,21 @@ func (s *Store) EnqueueDNSCleanup(ip, instanceID, label, reason string) (bool, e
 		return false, nil
 	}
 	payload := DNSCleanupPayload{IP: ip, InstanceID: instanceID, Label: label, Reason: reason}
+	settings := dns.LoadSettings(s.GetSetting, nil)
+	if settings.RulesConfigured {
+		selected := []dns.Rule{}
+		if owner != nil {
+			for _, rule := range settings.EffectiveRules() {
+				if rule.Enabled && rule.Scope.Matches(*owner) {
+					selected = append(selected, rule)
+				}
+			}
+		}
+		if len(selected) == 0 {
+			return false, nil
+		}
+		payload.Rules = &selected
+	}
 	jobID := fmt.Sprintf("dns-cleanup-%s-%d", ip, time.Now().UnixNano())
 	if err := s.EnqueueJob(jobID, DNSCleanupKind, ip, payload); err != nil {
 		return false, err
@@ -208,5 +241,5 @@ func (s *Store) EnqueueAccountDNSCleanup(account app.Account, reason string) (bo
 	if label == "" {
 		label = account.InstanceID
 	}
-	return s.EnqueueDNSCleanup(AccountPublicIP(account), account.InstanceID, label, reason)
+	return s.enqueueDNSCleanup(AccountPublicIP(account), account.InstanceID, label, reason, &account)
 }

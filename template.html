@@ -664,39 +664,6 @@
             animation: soft-fade-in .15s ease both;
         }
 
-        .dns-name-line {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 4px;
-            min-width: 0;
-            font-size: 11px;
-            color: var(--muted);
-        }
-
-        .dns-name-line > span {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .dns-name-edit {
-            flex-shrink: 0;
-            padding: 0;
-            border: 0;
-            background: none;
-            color: inherit;
-            font-size: 11px;
-            text-decoration: underline;
-            text-underline-offset: 2px;
-            cursor: pointer;
-        }
-
-        .dns-name-edit:disabled {
-            cursor: default;
-            opacity: 0.5;
-        }
-
         .dialog-card {
             width: min(520px, 100%);
             border-radius: 16px;
@@ -3350,6 +3317,17 @@
             font-weight: 600;
         }
 
+        .dns-rule-card { padding: 18px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+        .dns-rule-enabled { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+        .dns-rule-options { margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; max-height: 240px; overflow: auto; }
+        .dns-rule-options legend { font-size: 13px; padding: 0 4px; }
+        .dns-rule-options label { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; }
+        .dns-rule-options span { overflow-wrap: anywhere; }
+        .dns-rule-options input { flex: 0 0 auto; }
+        .dns-rule-preview { margin: 10px 0; color: var(--muted); font-size: 12px; }
+        .dns-rule-preview summary { cursor: pointer; }
+        .dns-rule-preview li { margin: 6px 0; overflow-wrap: anywhere; }
+
         .dns-credential-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5786,10 +5764,6 @@
                                     <div class="summary-cell">
                                         <div class="summary-primary font-mono text-sm">{{ inst.publicIp || inst.privateIp || '-' }}</div>
                                         <div class="summary-secondary">{{ publicIpModeLabel(inst) }}</div>
-                                        <div v-if="inst.dnsName" class="dns-name-line">
-                                            <span class="font-mono" :title="inst.dnsCustom ? '自定义解析名称' : '自动生成的解析名称'">{{ inst.dnsName }}</span>
-                                            <button type="button" class="dns-name-edit" @click="editInstanceDnsName(inst)" :disabled="isRefreshingInstance(inst.id)">改名</button>
-                                        </div>
                                         <span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span>
                                     </div>
                                     <div class="summary-cell center-column">
@@ -5844,7 +5818,7 @@
                                 <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
                                     <div><span class="text-[var(--muted)]">账号</span><p class="mt-1 text-xs">{{ inst.accountLabel }}</p></div>
                                     <div><span class="text-[var(--muted)]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
-                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ publicIpModeLabel(inst) }}</p><div v-if="inst.dnsName" class="dns-name-line"><span class="font-mono">{{ inst.dnsName }}</span><button type="button" class="dns-name-edit" @click="editInstanceDnsName(inst)" :disabled="isRefreshingInstance(inst.id)">改名</button></div><span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span></div>
+                                    <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ publicIpModeLabel(inst) }}</p><span v-if="ipCheckBadge(inst)" class="status-pill mt-1 !text-[10px]" :class="ipCheckBadge(inst).className" :title="ipCheckBadge(inst).title">{{ ipCheckBadge(inst).text }}</span></div>
                                     <div>
                                         <span class="text-[var(--muted)]">公网带宽峰值</span>
                                         <p class="mt-1 text-sm font-semibold">{{ formatPublicBandwidth(inst) }}</p>
@@ -6211,7 +6185,7 @@
                                         <h4>{{ currentDnsProvider.label }} 凭据</h4>
                                         <p class="settings-hint">{{ currentDnsProvider.hint }}</p>
                                         <div class="dns-credential-grid">
-                                            <template v-for="field in currentDnsProvider.fields" :key="`${currentDnsProvider.id}-${field.key}`">
+                                            <template v-for="field in currentDnsProvider.fields.filter(item => item.key !== 'zone_id')" :key="`${currentDnsProvider.id}-${field.key}`">
                                                 <label v-if="field.type === 'switch'" class="settings-toggle dns-credential-grid__wide">
                                                     <span><span>{{ field.label }}</span><span v-if="field.hint" class="settings-hint">{{ field.hint }}</span></span>
                                                     <span class="switch-control"><input type="checkbox" v-model="currentDnsCredentials[field.key]"><span class="switch-slider"></span></span>
@@ -6230,34 +6204,75 @@
                                     </div>
 
                                     <div class="settings-field">
-                                        <label for="dns-domain">根域名</label>
-                                        <div class="dns-domain-row">
-                                            <input id="dns-domain" v-model.trim="config.Ddns.domain" class="glass-input" placeholder="例如 example.com" autocomplete="off" spellcheck="false">
-                                            <button type="button" class="ghost-button" @click="testDnsProvider" :disabled="testingDns || !currentDnsProvider">{{ testingDns ? '测试中...' : '测试连接' }}</button>
-                                        </div>
-                                        <p class="settings-hint">自动解析在这个域名下创建记录，清理也只处理这个域名。测试会使用当前填写的内容，无需先保存。</p>
+                                        <button type="button" class="ghost-button" @click="testDnsProvider" :disabled="testingDns || !currentDnsProvider">{{ testingDns ? '测试中...' : '测试服务商连接' }}</button>
+                                        <p class="settings-hint">同一服务商的规则共用这里的凭据。每条规则单独选择域名和机器范围。</p>
                                         <div v-if="dnsTestResult" class="dns-test-result" :class="{ 'is-error': !dnsTestResult.success }" role="status">{{ dnsTestResult.message }}</div>
                                     </div>
 
                                     <div class="settings-subsection">
-                                        <h4>自动化</h4>
+                                        <div class="dns-cleanup-head">
+                                            <h4>解析规则</h4>
+                                            <button type="button" class="ghost-button" @click="addDnsRule">添加规则</button>
+                                        </div>
+                                        <p class="settings-hint">负载均衡默认只选阿里云。可以按账号组或实例选择池成员，同一实例可加入多个池。</p>
+                                        <p v-if="!config.Ddns.rules.length" class="settings-hint">还没有解析规则，添加一条规则开始配置。</p>
+                                        <article v-for="(rule, index) in config.Ddns.rules" :key="rule.id" class="dns-rule-card">
+                                            <div class="dns-cleanup-head">
+                                                <label class="dns-rule-enabled"><input type="checkbox" v-model="rule.enabled">启用规则 {{ index + 1 }}</label>
+                                                <button type="button" class="ghost-button" @click="config.Ddns.rules.splice(index, 1)">移除</button>
+                                            </div>
+                                            <div class="dns-credential-grid">
+                                                <div class="settings-field">
+                                                    <label :for="'dns-provider-' + rule.id">DNS 服务商</label>
+                                                    <select :id="'dns-provider-' + rule.id" v-model="rule.provider" class="glass-input" @change="rule.zone_id = ''"><option v-for="provider in dnsProviders" :key="provider.id" :value="provider.id">{{ provider.label }}</option></select>
+                                                </div>
+                                                <div class="settings-field dns-credential-grid__wide">
+                                                    <label :for="'dns-domain-' + rule.id">根域名</label>
+                                                    <div class="dns-domain-row">
+                                                        <input :id="'dns-domain-' + rule.id" v-model.trim="rule.domain" :list="'dns-domains-' + rule.id" class="glass-input" placeholder="选择或输入 example.com" autocomplete="off" spellcheck="false" @input="rule.zone_id = ''">
+                                                        <button type="button" class="ghost-button" @click="fetchDnsZones(rule)" :disabled="testingDns">读取域名</button>
+                                                    </div>
+                                                    <datalist :id="'dns-domains-' + rule.id"><option v-for="zone in dnsZones[rule.provider] || []" :key="zone.ID" :value="zone.Name"></option></datalist>
+                                                </div>
+                                                <div class="settings-field">
+                                                    <label :for="'dns-name-' + rule.id">解析名称</label>
+                                                    <input :id="'dns-name-' + rule.id" v-model.trim="rule.name" class="glass-input" placeholder="例如 loadbalance，@ 表示根域名" autocomplete="off" spellcheck="false">
+                                                    <p class="settings-hint">{{ dnsRuleFqdn(rule) || '填写后显示完整域名' }}</p>
+                                                </div>
+                                                <div class="settings-field">
+                                                    <label :for="'dns-scope-' + rule.id">机器范围</label>
+                                                    <select :id="'dns-scope-' + rule.id" v-model="rule.scope.mode" class="glass-input"><option value="aliyun">仅阿里云（中国站 + 国际站）</option><option value="aws">仅 AWS</option><option value="groups">指定账号组</option><option value="instances">逐台选择</option><option value="all">所有云平台</option></select>
+                                                </div>
+                                                <div v-if="['cloudflare', 'huawei', 'route53'].includes(rule.provider)" class="settings-field dns-credential-grid__wide">
+                                                    <label :for="'dns-zone-' + rule.id">此域名的 Zone ID（可选）</label>
+                                                    <input :id="'dns-zone-' + rule.id" v-model.trim="rule.zone_id" class="glass-input" placeholder="留空自动查找该域名" autocomplete="off">
+                                                </div>
+                                            </div>
+                                            <fieldset v-if="rule.scope.mode === 'groups'" class="dns-rule-options">
+                                                <legend>选择账号组</legend>
+                                                <label v-for="group in config.Accounts" :key="group.groupKey"><input type="checkbox" v-model="rule.scope.group_keys" :value="group.groupKey || `${group.AccessKeyId}|${group.regionId}`"><span>{{ group.remark || group.regionId }} · {{ group.siteType === 'aws' ? 'AWS' : '阿里云' }} · {{ group.regionId }}</span></label>
+                                                <p v-if="!config.Accounts.length" class="settings-hint">请先添加云账号。</p>
+                                            </fieldset>
+                                            <fieldset v-if="rule.scope.mode === 'instances'" class="dns-rule-options">
+                                                <legend>选择机器</legend>
+                                                <label v-for="inst in statusInstances" :key="inst.dnsInstanceKey"><input type="checkbox" v-model="rule.scope.instance_keys" :value="inst.dnsInstanceKey"><span>{{ inst.instanceName || inst.instanceId }} · {{ inst.siteType === 'aws' ? 'AWS' : '阿里云' }} · {{ inst.publicIp || inst.eipAddress || '暂无公网 IP' }}</span></label>
+                                                <p v-if="!statusInstances.length" class="settings-hint">当前没有实例，请先同步云端实例。</p>
+                                            </fieldset>
+                                            <p class="settings-hint">已匹配 {{ dnsRuleMembers(rule).length }} 台机器<span>，其中 {{ dnsRuleRunning(rule).length }} 台运行中且有公网 IP</span>。</p>
+                                            <details v-if="dnsRuleMembers(rule).length" class="dns-rule-preview"><summary>查看匹配的机器</summary><ul><li v-for="inst in dnsRuleMembers(rule)" :key="inst.id">{{ inst.instanceName || inst.instanceId }} · {{ inst.accountLabel }} · {{ inst.publicIp || inst.eipAddress || '暂无公网 IP' }}</li></ul></details>
+                                            <p class="settings-hint">仅运行中、未到期的机器参与轮询。没有可用机器时清空该名称的 A 记录。Cloudflare 请使用「仅 DNS」。</p>
+                                            <p v-else class="settings-hint">每台机器生成独立名称，可在实例管理中改名。一台机器只能匹配一条单机规则。</p>
+                                            <button type="button" class="ghost-button" @click="testDnsRule(rule)" :disabled="testingDns">测试此域名</button>
+                                        </article>
+                                        <p class="settings-hint">保存后生效。停用、移除或修改规则会清理原规则的解析记录；更换域名时先创建新解析。</p>
+                                    </div>
+
+                                    <div class="settings-subsection">
+                                        <h4>失效 IP 清理</h4>
                                         <label class="settings-toggle">
-                                            <span><span>实例失效时自动删除解析</span><span class="settings-hint">包年包月到期、实例被释放或回收、更换公网 IP 后，删除指向旧 IP 的 A 记录（含手动添加的记录）。多 IP 记录只移除该 IP；IP 仍被其他在用实例使用时跳过。</span></span>
+                                            <span><span>实例失效时自动删除解析</span><span class="settings-hint">在该机器匹配规则的域名内清理指向旧 IP 的 A 记录。显式指定的实例域名会保留。多 IP 记录只移除旧 IP；仍被其他在用实例使用的 IP 会保留。</span></span>
                                             <span class="switch-control"><input type="checkbox" v-model="config.Ddns.cleanup_enabled"><span class="switch-slider"></span></span>
                                         </label>
-                                        <p v-if="config.Ddns.cleanup_enabled && !config.Ddns.domain" class="settings-warning">没有填写根域名，清理会检查这个服务商账号下的全部域名。</p>
-                                        <label class="settings-toggle">
-                                            <span><span>自动把实例 IP 写入解析（DDNS）</span><span class="settings-hint">创建实例、开机、同步和更换 IP 时更新 A 记录。阿里云单台机器用「账号备注.根域名」，同账号多台用「账号备注-实例名.根域名」；AWS 每台机器固定用「账号备注-实例名.根域名」。在实例管理里可以给每台机器单独改名。</span></span>
-                                            <span class="switch-control"><input type="checkbox" v-model="config.Ddns.enabled"><span class="switch-slider"></span></span>
-                                        </label>
-                                        <p v-if="config.Ddns.enabled && !config.Ddns.domain" class="settings-warning">DDNS 需要填写根域名才会生效。</p>
-                                        <div class="settings-field">
-                                            <label for="dns-pool-name">轮询解析（可选）</label>
-                                            <input id="dns-pool-name" v-model.trim="config.Ddns.pool_name" class="glass-input" placeholder="例如 rr" autocomplete="off" spellcheck="false">
-                                            <p class="settings-hint">把所有运行中实例的 IP 写到同一个名称下，每个 IP 一条 A 记录，访问会大致平均地分到各个 IP。实例停机、开机或更换 IP 后一分钟左右更新，不受上面的 DDNS 开关影响。Cloudflare 请保持「仅 DNS」（灰云）。不要和实例的 DDNS 名称重名。留空即关闭，关闭不会删除已有记录。</p>
-                                            <p v-if="config.Ddns.pool_name && config.Ddns.domain" class="settings-hint">解析名：{{ dnsPoolFqdn }}</p>
-                                            <p v-if="config.Ddns.pool_name && !config.Ddns.domain" class="settings-warning">轮询解析需要填写根域名才会生效。</p>
-                                        </div>
                                     </div>
 
                                     <div class="settings-subsection">
@@ -7224,6 +7239,7 @@
     </div>
 
     <script src="static/vue.global.prod.js?v=__ASSET_VERSION__"></script>
+    <script src="static/dns-rules.js?v=__ASSET_VERSION__"></script>
     <script src="static/billing-display.js?v=__ASSET_VERSION__"></script>
     <script src="static/log-view.js?v=__ASSET_VERSION__"></script>
     <script src="static/log-motion.js?v=__ASSET_VERSION__"></script>
@@ -7634,6 +7650,7 @@
                         provider: 'cloudflare',
                         domain: '',
                         pool_name: '',
+                        rules: [],
                         credentials: {}
                     },
                     IpCheck: {
@@ -7726,7 +7743,6 @@
                 const statusInstances = ref([]);
                 const allInstances = ref([]);
                 const ipCheckEnabled = ref(false);
-                const ddnsActive = ref(false);
                 const testingIpProbe = ref(false);
                 const ipProbeTestResult = ref(null);
                 const systemLogs = ref([]);
@@ -8430,6 +8446,7 @@
                         provider: ddns.provider || 'cloudflare',
                         domain: ddns.domain || '',
                         pool_name: ddns.pool_name || '',
+                        rules: (ddns.rules || []).map(ECSDNSRules.normalize),
                         credentials: {}
                     };
                     for (const provider of payload?.DnsProviders || []) {
@@ -8501,7 +8518,6 @@
                         } else {
                             statusInstances.value = json.data || [];
                             ipCheckEnabled.value = !!json.ip_check_enabled;
-                            ddnsActive.value = !!json.ddns_active;
                             statusSyncInterval.value = Number(json.sync_interval || statusSyncInterval.value || 600);
                             const now = Math.floor(Date.now() / 1000);
                             cronWarning.value = json.system_last_run ? (now - json.system_last_run) > 180 : statusInstances.value.length > 0;
@@ -8873,7 +8889,6 @@
                             allInstances.value = data.data || [];
                             if (!sync) {
                                 ipCheckEnabled.value = !!data.ip_check_enabled;
-                                ddnsActive.value = !!data.ddns_active;
                             }
                             if (sync && !options.silent) {
                                 openAlert('实例已从云端同步完成', 'success');
@@ -9249,71 +9264,82 @@
                     return isAdmin.value && ipCheckEnabled.value && inst && !!inst.publicIp && !inst.operationLocked && inst.instanceStatus !== 'Releasing';
                 };
 
-                // The last mainland-China reachability result for the instance's current IP.
+                const liveIpChecks = ref({});
+                let ipCheckVisit = null;
+                const ipCheckKey = inst => JSON.stringify([inst.id, inst.publicIp]);
+                const visitIpTargets = () => allInstances.value.filter(inst =>
+                    canCheckIp(inst) && inst.instanceStatus === 'Running' && !inst.ipReplacing && !inst.expired
+                );
+                const ipCheckLabels = { ok: '国内可达', blocked: '疑似被墙', unknown: '无法判断' };
                 const ipCheckBadge = (inst) => {
                     if (inst.ipReplacing) {
                         return { text: '更换 IP 中', className: 'status-transition animate-pulse', title: '正在更换公网 IP，换好后会从国内检测' };
                     }
-                    const check = inst.ipCheck;
-                    if (!check) return null;
-                    const time = check.checkedAt ? new Date(check.checkedAt * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+                    if (!canCheckIp(inst)) return null;
+                    const check = liveIpChecks.value[ipCheckKey(inst)];
+                    if (!check && (inst.instanceStatus !== 'Running' || inst.expired)) return null;
+                    if (!check || check.status === 'checking') {
+                        return { text: check ? '国内检测中' : '等待国内检测', className: 'status-unknown', title: '本次访问的检测尚未完成' };
+                    }
+                    const time = check.checkedAt ? new Date(check.checkedAt * 1000).toLocaleTimeString('zh-CN', { hour12: false }) : '';
                     const title = [check.detail, time ? `检测时间 ${time}` : ''].filter(Boolean).join('\n');
-                    if (check.status === 'ok') return { text: '国内可达', className: 'status-running', title };
-                    if (check.status === 'blocked') return { text: '疑似被墙', className: 'status-error', title };
-                    return { text: '无法判断', className: 'status-unknown', title };
+                    const label = check.refused ? '端口拒绝连接' : ipCheckLabels[check.status] || ipCheckLabels.unknown;
+                    const className = check.status === 'ok' && !check.refused ? 'status-running' : check.status === 'blocked' ? 'status-error' : 'status-unknown';
+                    return { text: [check.port ? `TCP ${check.port} ${label}` : label, time].filter(Boolean).join(' · '), className, title };
                 };
 
-                const editInstanceDnsName = async (inst) => {
-                    const current = inst.dnsCustom ? inst.dnsName : '';
-                    const name = await askPrompt(`当前解析名称：${inst.dnsName}。填写新的名称（例如 jp1，会解析为 jp1.根域名），留空恢复自动生成的名称。改名会先写入新记录，再删除旧记录。`, {
-                        title: '修改解析名称',
-                        value: current,
-                        placeholder: '留空使用自动名称'
-                    });
-                    if (name === null || name === current) return;
-                    refreshingInstanceIds.value = [...new Set([...refreshingInstanceIds.value, inst.id])];
+                const runLiveIpCheck = async (inst, visit, interactive) => {
+                    const key = ipCheckKey(inst);
+                    if (!visit || visit.inFlight.has(key)) return;
+                    visit.inFlight.add(key);
+                    liveIpChecks.value[key] = { status: 'checking' };
+                    let result;
                     try {
-                        const res = await fetch('index.php?action=set_instance_dns_name', {
+                        const res = await fetch('index.php?action=check_instance_ip', {
                             method: 'POST',
-                            body: JSON.stringify({ accountId: inst.id, name })
+                            body: JSON.stringify({ accountId: inst.id }),
+                            signal: visit.controller.signal
                         });
-                        const data = await res.json();
-                        if (!res.ok || !data.success) {
-                            openAlert(data.message || '修改解析名称失败', 'error');
-                            return;
-                        }
-                        patchInstanceLists(inst.id, { dnsName: data.data?.dnsName || inst.dnsName, dnsCustom: !!data.data?.dnsCustom });
-                        openAlert(data.message || '解析名称已修改', 'success');
+                        const body = await res.json();
+                        if (!res.ok || !body.success) throw new Error(body.message || '检测失败');
+                        if (body.data?.ip !== inst.publicIp) throw new Error('公网 IP 已变化');
+                        result = body.data;
                     } catch (error) {
-                        console.error('Set DNS name failed', error);
-                        openAlert('修改解析名称请求失败', 'error');
+                        if (visit.controller.signal.aborted) return;
+                        result = { status: 'unknown', detail: error.message || '检测请求失败' };
                     } finally {
-                        refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(inst.id));
+                        visit.inFlight.delete(key);
+                    }
+                    if (ipCheckVisit !== visit) return;
+                    liveIpChecks.value[key] = result;
+                    if (interactive) {
+                        openAlert(result.detail || ipCheckLabels[result.status], result.status === 'ok' && !result.refused ? 'success' : 'error');
+                    }
+                    queueVisitIpChecks();
+                };
+
+                const queueVisitIpChecks = () => {
+                    const visit = ipCheckVisit;
+                    if (!visit) return;
+                    for (const inst of visitIpTargets()) {
+                        if (visit.inFlight.size >= 3) break;
+                        if (!liveIpChecks.value[ipCheckKey(inst)]) void runLiveIpCheck(inst, visit, false);
+                    }
+                };
+
+                const startIpCheckVisit = () => {
+                    ipCheckVisit?.controller.abort();
+                    ipCheckVisit = null;
+                    liveIpChecks.value = {};
+                    if (currentMenu.value === 'manage' && isAdmin.value && ipCheckEnabled.value && !document.hidden) {
+                        ipCheckVisit = { controller: new AbortController(), inFlight: new Set() };
+                        queueVisitIpChecks();
                     }
                 };
 
                 const checkInstanceIp = async (accountId) => {
-                    refreshingInstanceIds.value = [...new Set([...refreshingInstanceIds.value, accountId])];
-                    try {
-                        const res = await fetch('index.php?action=check_instance_ip', {
-                            method: 'POST',
-                            body: JSON.stringify({ accountId })
-                        });
-                        const data = await res.json();
-                        if (!res.ok || !data.success) {
-                            openAlert(data.message || '检测失败', 'error');
-                            return;
-                        }
-                        const check = data.data || {};
-                        patchInstanceLists(accountId, { ipCheck: check });
-                        const label = { ok: '国内可达', blocked: '疑似被墙', unknown: '无法判断' }[check.status] || '无法判断';
-                        openAlert(`${check.ip || ''} ${label}：${check.detail || ''}`, check.status === 'ok' ? 'success' : 'error');
-                    } catch (error) {
-                        console.error('Check instance IP failed', error);
-                        openAlert('检测请求失败', 'error');
-                    } finally {
-                        refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(accountId));
-                    }
+                    const inst = allInstances.value.find(item => Number(item.id) === Number(accountId));
+                    if (inst) await runLiveIpCheck(inst, ipCheckVisit, true);
                 };
 
                 const controlInstance = async (accountId, action) => {
@@ -9969,12 +9995,31 @@
                 ].map((group) => ({ ...group, items: dnsProviders.value.filter((provider) => provider.market === group.key) }))
                     .filter((group) => group.items.length));
 
-                // Mirrors dns.Settings.PoolFQDN.
-                const dnsPoolFqdn = computed(() => {
-                    const name = (config.value.Ddns.pool_name || '').toLowerCase().replace(/^\.+|\.+$/g, '');
-                    const domain = config.value.Ddns.domain || '';
-                    return name === domain || name.endsWith('.' + domain) ? name : `${name}.${domain}`;
-                });
+                const dnsRuleFqdn = ECSDNSRules.fqdn;
+                const dnsZones = ref({});
+                const dnsRuleMembers = rule => statusInstances.value.filter(inst => ECSDNSRules.matches(rule, inst));
+                const dnsRuleRunning = rule => dnsRuleMembers(rule).filter(inst => inst.status === 'Running' && !inst.expired && inst.cloudPresence !== 'missing' && (inst.eipAddress || inst.publicIp));
+                const addDnsRule = () => config.value.Ddns.rules.push(ECSDNSRules.normalize({
+                    id: `rule-${globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)}`, enabled: true, kind: 'pool',
+                    provider: config.value.Ddns.provider, domain: '', name: 'loadbalance', scope: { mode: 'aliyun' }
+                }));
+                const dnsRuleRequest = async (rule, listZones = false) => {
+                    testingDns.value = true;
+                    dnsTestResult.value = null;
+                    try {
+                        const draft = { ...config.value.Ddns, provider: rule.provider, domain: rule.domain };
+                        const res = await fetch('index.php?action=test_dns', {
+                            method: 'POST', body: JSON.stringify({ Ddns: draft, ...(listZones ? { list_zones: true } : { rule }) })
+                        });
+                        const data = await res.json();
+                        if (listZones && data.success) dnsZones.value[rule.provider] = data.zones || [];
+                        dnsTestResult.value = { success: !!data.success, message: data.message || data.error || (listZones ? `已读取 ${(data.zones || []).length} 个域名，请在根域名输入框中选择。` : '测试完成') };
+                    } catch (error) {
+                        dnsTestResult.value = { success: false, message: '请求失败，请检查网络' };
+                    } finally { testingDns.value = false; }
+                };
+                const fetchDnsZones = rule => dnsRuleRequest(rule, true);
+                const testDnsRule = rule => dnsRuleRequest(rule);
                 const currentDnsProvider = computed(() => dnsProviders.value.find((provider) => provider.id === config.value.Ddns.provider) || null);
                 const currentDnsCredentials = computed(() => config.value.Ddns.credentials[config.value.Ddns.provider] || {});
 
@@ -10006,12 +10051,12 @@
                     try {
                         const res = await fetch('index.php?action=test_dns', {
                             method: 'POST',
-                            body: JSON.stringify({ Ddns: config.value.Ddns })
+                            body: JSON.stringify({ Ddns: { ...config.value.Ddns, domain: '' } })
                         });
                         const data = await res.json();
                         dnsTestResult.value = {
                             success: !!data.success,
-                            message: data.success ? `${data.message} 清理范围：${data.scope}。` : (data.message || '测试失败')
+                            message: data.success ? '服务商连接正常，请在规则中测试要使用的域名。' : (data.message || '测试失败')
                         };
                     } catch (error) {
                         console.error(error);
@@ -10436,10 +10481,13 @@
                 };
 
                 watch(currentMenu, syncCurrentMenu);
+                watch([currentMenu, isAdmin, ipCheckEnabled], startIpCheckVisit);
+                watch(allInstances, queueVisitIpChecks);
                 watch([currentMenu, currentSettingsTab, currentNotifyTab, currentLogTab], persistNavigationState);
                 watch([currentMenu, currentSettingsTab, isAdmin], ([menu, tab, admin]) => {
                     if (menu === 'settings' && tab === 'ddns' && admin) {
                         fetchDnsCleanupTasks();
+                        fetchStatusData(false);
                     }
                 }, { immediate: true });
 
@@ -10511,11 +10559,14 @@
 
                 onMounted(() => {
                     setupMobileNavScroll();
+                    document.addEventListener('visibilitychange', startIpCheckVisit);
                     checkInitStatus();
                 });
 
                 onUnmounted(() => {
                     accountTestController?.abort();
+                    document.removeEventListener('visibilitychange', startIpCheckVisit);
+                    ipCheckVisit?.controller.abort();
                     teardownMobileNavScroll();
                     logView.dispose();
                     stopStatusPolling();
@@ -10634,7 +10685,14 @@
                     testingWebhook,
                     dnsProviderGroups,
                     currentDnsProvider,
-                    dnsPoolFqdn,
+                    dnsProviders,
+                    dnsRuleFqdn,
+                    dnsZones,
+                    dnsRuleMembers,
+                    dnsRuleRunning,
+                    addDnsRule,
+                    fetchDnsZones,
+                    testDnsRule,
                     currentDnsCredentials,
                     dnsSavedSecrets,
                     dnsProviderBadge,
@@ -10649,8 +10707,6 @@
                     ipCheckBadge,
                     canCheckIp,
                     checkInstanceIp,
-                    editInstanceDnsName,
-                    ddnsActive,
                     publicIpModeLabel,
                     allRegions,
                     regionsForSite,

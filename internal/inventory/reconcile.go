@@ -3,7 +3,6 @@ package inventory
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/Kori1c/ecs-controller/internal/app"
@@ -195,18 +194,8 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 				st.AddLog("warning", "实例已消失，但解析清理任务入队失败: "+enqueueErr.Error())
 			}
 		}
-		if st.GetSetting("ddns_enabled", "0") == "1" {
-			jobID := fmt.Sprintf("inventory-ddns-%s-%d", account.InstanceID, now.UnixNano())
-			payload := map[string]any{"account": ddnsPayloadAccount(account), "before": ddnsPayloadAccounts(accounts)}
-			if enqueueErr := st.EnqueueJob(jobID, "delete_ddns", strconv.FormatInt(account.ID, 10), payload); enqueueErr != nil {
-				st.AddLog("warning", "云端实例已清理，但 DDNS 清理任务入队失败: "+enqueueErr.Error())
-			}
-		}
 	}
 
-	if (result.Purged > 0 || result.Recovered > 0) && st.GetSetting("ddns_enabled", "0") == "1" {
-		_ = st.SetSetting("last_ddns_reconcile", "0")
-	}
 	return result, nil
 }
 
@@ -268,22 +257,4 @@ func confirmMissing(ctx context.Context, client cloud.Client, region, instanceID
 func sameGroup(account app.Account, group app.AccountGroup) bool {
 	return (account.GroupKey != "" && group.GroupKey != "" && account.GroupKey == group.GroupKey) ||
 		(account.AccessKeyID != "" && account.AccessKeyID == group.AccessKeyID && account.RegionID == group.RegionID)
-}
-
-func ddnsPayloadAccount(account app.Account) map[string]any {
-	return map[string]any{
-		"GroupKey": account.GroupKey, "AccessKeyID": account.AccessKeyID,
-		"RegionID": account.RegionID, "InstanceID": account.InstanceID,
-		"Remark": account.Remark, "InstanceName": account.InstanceName, "SiteType": account.SiteType,
-	}
-}
-
-func ddnsPayloadAccounts(accounts []app.Account) []map[string]any {
-	result := make([]map[string]any, 0, len(accounts))
-	for _, account := range accounts {
-		if account.IsDeleted == 0 {
-			result = append(result, ddnsPayloadAccount(account))
-		}
-	}
-	return result
 }

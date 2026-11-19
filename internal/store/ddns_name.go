@@ -32,6 +32,25 @@ func (s *Store) CustomDNSName(account app.Account) string {
 	return name
 }
 
+// CustomDNSLabels includes explicitly assigned names even after an instance
+// disappears. Cleanup must preserve those names on retry and after removal.
+func (s *Store) CustomDNSLabels() ([]string, error) {
+	rows, err := s.DB.Query(`SELECT DISTINCT name FROM dns_names WHERE name <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // SetCustomDNSName stores the instance's chosen name; "" goes back to the
 // automatic one.
 func (s *Store) SetCustomDNSName(account app.Account, name string) error {
@@ -74,18 +93,9 @@ func NormalizeDNSName(name, domain string) (string, error) {
 	return name, nil
 }
 
-// DDNSRecordName is the DNS name that points at the instance. A custom name
-// wins. Otherwise an AWS instance always gets "account-instance", so each
-// machine keeps its own name however many share the account; an Alibaba
-// Cloud instance gets "account" until the account has several instances.
-func (s *Store) DDNSRecordName(account app.Account, accounts []app.Account) string {
-	return s.DDNSNameWith(account, accounts, s.CustomDNSName(account))
-}
-
-// DDNSNameWith is the full name the instance would get with custom as its
-// chosen name ("" for the automatic one).
-func (s *Store) DDNSNameWith(account app.Account, accounts []app.Account, custom string) string {
-	domain := NormalizeDDNSDomain(s.GetSetting("ddns_domain", ""))
+// DDNSNameForDomain reconstructs the name assigned by older versions so their
+// standalone records can be removed during migration.
+func (s *Store) DDNSNameForDomain(account app.Account, accounts []app.Account, custom, domain string) string {
 	if custom != "" {
 		return joinDomain(custom, domain)
 	}
@@ -110,7 +120,7 @@ func (s *Store) autoDDNSName(account app.Account, accounts []app.Account) string
 		if key == "" {
 			key = item.AccessKeyID + "|" + item.RegionID
 		}
-		if key == groupKey && item.InstanceID != "" && item.CloudPresence != "missing" {
+		if key == groupKey && item.InstanceID != "" && item.IsDeleted == 0 && item.CloudPresence != "missing" {
 			count++
 		}
 	}

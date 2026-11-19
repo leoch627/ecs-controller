@@ -25,27 +25,53 @@ func (w *Worker) dnsCleanupJob(ctx context.Context, job *store.Job) error {
 	if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
 		return err
 	}
+	w.Store.DNSConfigMu.Lock()
+	defer w.Store.DNSConfigMu.Unlock()
 	settings := w.dnsSettings()
 	if !settings.CleanupEnabled {
 		return w.finishDNSCleanup(job, DNSCleanupResult{Outcome: "skipped", Message: "解析清理已关闭，未处理"})
-	}
-	if !settings.Configured() {
-		return fmt.Errorf("解析服务商凭据没有填写完整")
 	}
 	if user := w.activeInstanceUsingIP(payload.IP); user != "" {
 		w.Store.AddLog("info", fmt.Sprintf("解析清理已跳过 %s：仍被实例 %s 使用", payload.IP, user))
 		return w.finishDNSCleanup(job, DNSCleanupResult{Outcome: "skipped", Message: "IP 仍被实例 " + user + " 使用，已跳过"})
 	}
-	service, err := w.dnsService(settings)
+	scopes := []dns.Settings{settings}
+	if settings.RulesConfigured || payload.Rules != nil {
+		scopes = nil
+		seen := map[string]bool{}
+		rules := settings.EffectiveRules()
+		if payload.Rules != nil {
+			rules = *payload.Rules
+		}
+		for _, rule := range rules {
+			if !rule.Enabled {
+				continue
+			}
+			key := rule.Provider + "|" + rule.Domain + "|" + rule.ZoneID
+			if !seen[key] {
+				scopes = append(scopes, settings.ForRule(rule))
+				seen[key] = true
+			}
+		}
+	}
+	custom, err := w.Store.CustomDNSLabels()
 	if err != nil {
 		return err
 	}
 	cleanupCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	changes, err := service.RemoveIP(cleanupCtx, payload.IP)
-	if err != nil {
-		w.Store.AddLog("warning", fmt.Sprintf("解析清理失败 [%s] %s（第 %d 次）：%v", payload.Label, payload.IP, job.Attempts, err))
-		return err
+	changes := []dns.Change{}
+	for _, scope := range scopes {
+		service, err := w.dnsService(scope)
+		if err != nil {
+			return err
+		}
+		current, err := service.RemoveIP(cleanupCtx, payload.IP, custom...)
+		changes = append(changes, current...)
+		if err != nil {
+			w.Store.AddLog("warning", fmt.Sprintf("解析清理失败 [%s] %s（第 %d 次）：%v", payload.Label, payload.IP, job.Attempts, err))
+			return err
+		}
 	}
 	summary := dns.SummarizeChanges(changes)
 	w.Store.AddLog("info", fmt.Sprintf("解析清理完成 [%s] %s：%s", payload.Label, payload.IP, summary))

@@ -373,9 +373,9 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 	case "replace_instance_ip":
 		s.replaceIP(w, data)
 	case "check_instance_ip":
-		s.checkInstanceIP(w, data)
+		s.checkInstanceIP(r.Context(), w, data)
 	case "set_instance_dns_name":
-		s.setInstanceDNSName(w, data)
+		s.error(w, http.StatusGone, "单机解析已移除，请使用负载均衡规则")
 	case "test_ip_probe":
 		s.testIPProbe(w, data)
 	case "refresh_account", "sync_account_group", "restore_schedule_block":
@@ -746,7 +746,6 @@ func (s *Server) status(w http.ResponseWriter) {
 	accounts, _ := s.Store.LoadAccounts(false)
 	expiries := s.Store.ExpiryByInstance()
 	ipChecks := s.Store.IPChecks()
-	ddnsActive := dns.LoadSettings(s.Store.GetSetting, s.Store.OpenSecret).DDNSActive()
 	data := make([]map[string]any, 0)
 	for _, a := range accounts {
 		if a.InstanceID == "" {
@@ -763,17 +762,14 @@ func (s *Server) status(w http.ResponseWriter) {
 		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95)), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
 		item := data[len(data)-1]
 		item["siteType"] = a.SiteType
-		if ddnsActive {
-			item["dnsName"] = s.Store.DDNSRecordName(a, accounts)
-			item["dnsCustom"] = s.Store.CustomDNSName(a) != ""
-		}
+		item["dnsInstanceKey"] = dns.InstanceKey(a)
 		_, item["ipReplacing"] = s.ipReplacing.Load(a.ID)
 		// A result for an earlier IP says nothing about the current one.
 		if check, ok := ipChecks[a.ID]; ok && check.IP != "" && check.IP == a.PublicIP {
 			item["ipCheck"] = map[string]any{"ip": check.IP, "status": check.Status, "detail": check.Detail, "checkedAt": check.CheckedAt}
 		}
 	}
-	s.json(w, 200, map[string]any{"data": data, "ip_check_enabled": s.ipCheckSettings().enabled(), "ddns_active": ddnsActive, "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
+	s.json(w, 200, map[string]any{"data": data, "ip_check_enabled": s.ipCheckSettings().enabled(), "system_last_run": s.Store.LastRun(), "sync_interval": numberString(s.Store.GetSetting("api_interval", ""), 600), "sensitive_visible": true})
 }
 
 func (s *Server) saveConfig(data map[string]any) error {
@@ -893,21 +889,8 @@ func (s *Server) saveConfig(data map[string]any) error {
 		if err != nil {
 			return err
 		}
-		beforeAccounts, _ := s.Store.LoadAccounts(false)
-		removedAccounts, err := s.Store.RemoveAccountsOutsideGroups(groups)
-		if err != nil {
+		if _, err := s.Store.RemoveAccountsOutsideGroups(groups); err != nil {
 			return err
-		}
-		for _, account := range removedAccounts {
-			if s.Store.GetSetting("ddns_enabled", "0") != "1" {
-				break
-			}
-			_ = s.Store.EnqueueJob(randomToken(16), "delete_ddns", strconv.FormatInt(account.ID, 10), map[string]any{"account": ddnsPayloadAccount(account), "before": ddnsPayloadAccounts(beforeAccounts)})
-		}
-		if s.Store.GetSetting("ddns_enabled", "0") == "1" {
-			// The monitor will reconcile current records and remove stale names
-			// on its next pass after a configuration change.
-			_ = s.Store.SetSetting("last_ddns_reconcile", "0")
 		}
 		for _, group := range groups {
 			if err := s.Store.ApplyGroupSettings(group); err != nil {
@@ -946,18 +929,6 @@ func validateAccountRegionUniqueness(raw []any) error {
 		seen[key] = struct{}{}
 	}
 	return nil
-}
-
-func ddnsPayloadAccount(account app.Account) map[string]any {
-	return map[string]any{"GroupKey": account.GroupKey, "AccessKeyID": account.AccessKeyID, "RegionID": account.RegionID, "InstanceID": account.InstanceID, "Remark": account.Remark, "InstanceName": account.InstanceName, "SiteType": account.SiteType}
-}
-
-func ddnsPayloadAccounts(accounts []app.Account) []map[string]any {
-	result := make([]map[string]any, 0, len(accounts))
-	for _, account := range accounts {
-		result = append(result, ddnsPayloadAccount(account))
-	}
-	return result
 }
 
 func (s *Server) preview(w http.ResponseWriter, r *http.Request, data map[string]any) {
@@ -1522,17 +1493,9 @@ func (s *Server) refreshAccount(w http.ResponseWriter, data map[string]any) {
 	instance, err := client.DescribeInstance(rctx(), a.RegionID, a.InstanceID)
 	if err != nil {
 		if cloud.IsNotFound(err) {
-			beforeAccounts, _ := s.Store.LoadAccounts(false)
 			if err := s.Store.DeleteInstanceData(a.ID); err != nil {
 				s.error(w, 500, "清理云端不存在实例失败: "+err.Error())
 				return
-			}
-			if s.Store.GetSetting("ddns_enabled", "0") == "1" {
-				payload := map[string]any{"account": ddnsPayloadAccount(*a), "before": ddnsPayloadAccounts(beforeAccounts)}
-				if enqueueErr := s.Store.EnqueueJob(randomToken(16), "delete_ddns", strconv.FormatInt(a.ID, 10), payload); enqueueErr != nil {
-					s.Store.AddLog("warning", "云端实例已清理，但 DDNS 清理任务入队失败: "+enqueueErr.Error())
-				}
-				_ = s.Store.SetSetting("last_ddns_reconcile", "0")
 			}
 			if _, enqueueErr := s.Store.EnqueueAccountDNSCleanup(*a, "vanished"); enqueueErr != nil {
 				s.Store.AddLog("warning", "实例已消失，但解析清理任务入队失败: "+enqueueErr.Error())

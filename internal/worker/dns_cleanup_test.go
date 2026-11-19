@@ -22,11 +22,14 @@ func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { ret
 
 // fakeCloudflare is just enough of the Cloudflare v4 API for cleanup jobs.
 type fakeCloudflare struct {
-	mu      sync.Mutex
-	records map[string]string // record id -> "name ip"
-	deleted []string
-	created int
-	fail    bool
+	mu           sync.Mutex
+	records      map[string]string // record id -> "name ip"
+	deleted      []string
+	created      int
+	fail         bool
+	zones        []map[string]any
+	failZone     string
+	failDeleteID string
 }
 
 func (f *fakeCloudflare) client() *http.Client {
@@ -38,12 +41,20 @@ func (f *fakeCloudflare) client() *http.Client {
 				"errors": []map[string]any{{"code": 9109, "message": "Invalid access token"}}})
 			return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{}}, nil
 		}
-		if f.fail {
+		if f.fail || (f.failZone != "" && strings.Contains(r.URL.Path, "/zones/"+f.failZone+"/")) {
 			return reply(401, nil)
 		}
 		path := strings.TrimPrefix(r.URL.Path, "/client/v4")
+		// Tests can model multiple zones without changing the provider code.
+		for _, zone := range f.zones {
+			id, _ := zone["id"].(string)
+			path = strings.Replace(path, "/zones/"+id+"/", "/zones/zone-1/", 1)
+		}
 		switch {
 		case r.Method == http.MethodGet && path == "/zones":
+			if len(f.zones) > 0 {
+				return reply(200, f.zones)
+			}
 			return reply(200, []map[string]any{{"id": "zone-1", "name": "example.com"}})
 		case r.Method == http.MethodGet && path == "/zones/zone-1/dns_records":
 			items := []map[string]any{}
@@ -71,6 +82,9 @@ func (f *fakeCloudflare) client() *http.Client {
 			return reply(200, map[string]any{"id": id})
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/zones/zone-1/dns_records/"):
 			id := strings.TrimPrefix(path, "/zones/zone-1/dns_records/")
+			if id == f.failDeleteID {
+				return reply(502, nil)
+			}
 			delete(f.records, id)
 			f.deleted = append(f.deleted, id)
 			return reply(200, map[string]any{"id": id})
@@ -223,5 +237,21 @@ func TestReleasingInstanceQueuesDNSCleanup(t *testing.T) {
 	jobs, _ := s.ListJobs(store.DNSCleanupKind, 10)
 	if len(jobs) != 1 || jobs[0].EntityKey != "47.1.1.7" || !strings.Contains(jobs[0].Payload, `"released"`) {
 		t.Fatalf("release should queue the IP for cleanup, got %+v", jobs)
+	}
+}
+
+func TestDNSCleanupPreservesExplicitInstanceHostname(t *testing.T) {
+	cf := &fakeCloudflare{records: map[string]string{
+		"api": "api-nrt.example.com 47.1.1.1", "stale": "legacy.example.com 47.1.1.1",
+	}}
+	w, s := newCleanupWorker(t, cf)
+	if err := s.SetCustomDNSName(app.Account{InstanceID: "i-old"}, "api-nrt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCleanup(t, w, s, "47.1.1.1"); err != nil {
+		t.Fatal(err)
+	}
+	if cf.records["api"] == "" || cf.records["stale"] != "" {
+		t.Fatalf("expected cleanup to preserve the custom name only: %+v", cf.records)
 	}
 }

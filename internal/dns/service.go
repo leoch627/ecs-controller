@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,12 +12,13 @@ import (
 
 // Settings is the saved DNS configuration, with secrets already decrypted.
 type Settings struct {
-	Provider       string
-	Domain         string
-	DDNSEnabled    bool
-	CleanupEnabled bool
-	// PoolName is a name under Domain that resolves to every running
-	// instance, so clients are spread across them. Empty turns it off.
+	Rules           []Rule
+	RulesConfigured bool
+	Provider        string
+	Domain          string
+	DDNSEnabled     bool
+	CleanupEnabled  bool
+	// PoolName is the legacy Alibaba Cloud round-robin name.
 	PoolName string
 	// Credentials holds every provider's form values so switching providers
 	// in the UI never loses the other one's keys.
@@ -46,6 +48,12 @@ func LoadSettings(get func(key, fallback string) string, open func(string) (stri
 		}
 		settings.Credentials[info.ID] = cfg
 	}
+	if raw := get("ddns_rules", ""); raw != "" {
+		settings.RulesConfigured = true
+		if err := json.Unmarshal([]byte(raw), &settings.Rules); err != nil {
+			settings.Rules = nil // Invalid saved rules must never widen the scope.
+		}
+	}
 	return settings
 }
 
@@ -65,27 +73,9 @@ func (s Settings) Configured() bool {
 	return info.Configured(cfg)
 }
 
-// DDNSActive: automatic A records need the switch, credentials and a root domain.
-func (s Settings) DDNSActive() bool {
-	return s.DDNSEnabled && s.Domain != "" && s.Configured()
-}
-
-// PoolFQDN is the full round-robin name, or "" when it is off. A name that
-// already ends with the root domain is used as is.
+// PoolFQDN returns the fully qualified legacy round-robin name.
 func (s Settings) PoolFQDN() string {
-	if s.PoolName == "" || s.Domain == "" {
-		return ""
-	}
-	if s.PoolName == s.Domain || strings.HasSuffix(s.PoolName, "."+s.Domain) {
-		return s.PoolName
-	}
-	return s.PoolName + "." + s.Domain
-}
-
-// PoolActive: the round-robin name needs a pool name, a root domain and
-// credentials. It does not depend on the per-instance DDNS switch.
-func (s Settings) PoolActive() bool {
-	return s.PoolFQDN() != "" && s.Configured()
+	return (Rule{Domain: s.Domain, Name: s.PoolName}).FQDN()
 }
 
 // CleanupActive: removing dead IPs needs the switch and credentials. Without a
@@ -120,6 +110,9 @@ func NewServiceWithProvider(settings Settings, provider Provider) *Service {
 
 // Label is the provider's display name.
 func (s *Service) Label() string { return s.info.Label }
+
+// Zones lists domains available to the current provider credentials.
+func (s *Service) Zones(ctx context.Context) ([]Zone, error) { return s.provider.ListZones(ctx) }
 
 // SyncA points name at ip. It returns "created", "updated" or "unchanged".
 func (s *Service) SyncA(ctx context.Context, name, ip string) (string, error) {
@@ -289,8 +282,8 @@ type Change struct {
 }
 
 // RemoveIP deletes records that only point at ip and removes ip from records
-// that also point elsewhere.
-func (s *Service) RemoveIP(ctx context.Context, ip string) ([]Change, error) {
+// that also point elsewhere, preserving explicitly assigned names.
+func (s *Service) RemoveIP(ctx context.Context, ip string, customLabels ...string) ([]Change, error) {
 	if net.ParseIP(strings.TrimSpace(ip)).To4() == nil {
 		return nil, fmt.Errorf("IP 地址无效：%s", ip)
 	}
@@ -305,6 +298,16 @@ func (s *Service) RemoveIP(ctx context.Context, ip string) ([]Change, error) {
 			return changes, err
 		}
 		for _, record := range records {
+			if domain := s.settings.Domain; domain != "" && record.Name != domain && !strings.HasSuffix(record.Name, "."+domain) {
+				continue
+			}
+			ownerDomain := s.settings.Domain
+			if ownerDomain == "" {
+				ownerDomain = zone.Name
+			}
+			if IsCustomName(record.Name, ownerDomain, customLabels) {
+				continue
+			}
 			remaining := withoutValue(record.Values, ip)
 			if len(remaining) == 0 {
 				if err := s.provider.DeleteA(ctx, zone, record); err != nil {
@@ -468,3 +471,5 @@ func isPublicIPv4(value string) bool {
 	ip := net.ParseIP(strings.TrimSpace(value))
 	return ip != nil && ip.To4() != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
 }
+
+func IsPublicIPv4(value string) bool { return isPublicIPv4(value) }

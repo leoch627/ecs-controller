@@ -244,7 +244,7 @@ func TestCheckInstanceIPReportsBlockedAndStatusHidesStaleResults(t *testing.T) {
 	ipCheckFixture(t, st, 5, []string{"203.0.113.10"}, nil)
 
 	recorder := httptest.NewRecorder()
-	srv.checkInstanceIP(recorder, map[string]any{"accountId": 1})
+	srv.checkInstanceIP(context.Background(), recorder, map[string]any{"accountId": 1})
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"status":"blocked"`) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
