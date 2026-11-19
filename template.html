@@ -6261,7 +6261,6 @@
                                             <p class="settings-hint">已匹配 {{ dnsRuleMembers(rule).length }} 台机器<span>，其中 {{ dnsRuleRunning(rule).length }} 台运行中且有公网 IP</span>。</p>
                                             <details v-if="dnsRuleMembers(rule).length" class="dns-rule-preview"><summary>查看匹配的机器</summary><ul><li v-for="inst in dnsRuleMembers(rule)" :key="inst.id">{{ inst.instanceName || inst.instanceId }} · {{ inst.accountLabel }} · {{ inst.publicIp || inst.eipAddress || '暂无公网 IP' }}</li></ul></details>
                                             <p class="settings-hint">仅运行中、未到期的机器参与轮询。没有可用机器时清空该名称的 A 记录。Cloudflare 请使用「仅 DNS」。</p>
-                                            <p v-else class="settings-hint">每台机器生成独立名称，可在实例管理中改名。一台机器只能匹配一条单机规则。</p>
                                             <button type="button" class="ghost-button" @click="testDnsRule(rule)" :disabled="testingDns">测试此域名</button>
                                         </article>
                                         <p class="settings-hint">保存后生效。停用、移除或修改规则会清理原规则的解析记录；更换域名时先创建新解析。</p>
