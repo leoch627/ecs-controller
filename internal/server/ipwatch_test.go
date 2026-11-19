@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Kori1c/ecs-controller/internal/app"
+	"github.com/Kori1c/ecs-controller/internal/dns"
 )
 
 func TestIPWatchSwapsABlockedInstance(t *testing.T) {
@@ -102,5 +103,30 @@ func TestIPWatchIntervalIsConfigurable(t *testing.T) {
 	}
 	if err := srv.saveIPCheckConfig(map[string]any{"port": 22, "max_swaps": 5, "auto_interval": 5000}); err == nil {
 		t.Fatal("out-of-range interval accepted")
+	}
+}
+
+func TestIPWatchNeverTouchesExcludedInstances(t *testing.T) {
+	fake := &sequenceEIPClient{addresses: []string{"198.51.100.1"}}
+	srv, st := newReplaceIPServer(t, lightsailAccount(), fake)
+	ipCheckFixture(t, st, 3, []string{"203.0.113.10"}, nil)
+	key := dns.InstanceKey(lightsailAccount())
+	if err := srv.saveIPCheckConfig(map[string]any{"probe_url": srv.ipCheckSettings().ProbeURL, "port": 443, "max_swaps": 3, "auto_interval": 20, "auto_exclude": []any{key}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.ipCheckConfig()["auto_exclude"].([]string); len(got) != 1 || got[0] != key {
+		t.Fatalf("round trip: %v", got)
+	}
+
+	srv.ipWatchRound(context.Background(), srv.ipCheckSettings(), time.Now())
+
+	if got := fake.joined(); got != "" {
+		t.Fatalf("excluded instance swapped: %s", got)
+	}
+	if _, ok := st.IPChecks()[1]; ok {
+		t.Fatal("excluded instance was checked")
+	}
+	if err := srv.saveIPCheckConfig(map[string]any{"port": 443, "max_swaps": 3, "auto_exclude": []any{"not-a-key"}}); err == nil {
+		t.Fatal("invalid key accepted")
 	}
 }

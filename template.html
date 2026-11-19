@@ -6370,6 +6370,12 @@
                                         <input id="ipcheck-interval" v-model.number="config.IpCheck.auto_interval" type="number" min="0" max="1440" class="glass-input" placeholder="20">
                                         <p class="settings-hint">每隔这么久从国内检测一次所有运行中、可以更换 IP 的实例（绑定了 EIP 的阿里云实例和 AWS 实例），被墙就自动更换，规则同上。两边都连不上时不换；一轮里超过一半同时不可达时按探测机故障处理，也不换。填 0 关闭。</p>
                                     </div>
+                                    <fieldset class="dns-rule-options">
+                                        <legend>不参与定时检测的机器</legend>
+                                        <label v-for="inst in statusInstances" :key="inst.dnsInstanceKey"><input type="checkbox" v-model="config.IpCheck.auto_exclude" :value="inst.dnsInstanceKey"><span>{{ inst.instanceName || inst.instanceId }} · {{ inst.accountLabel }} · {{ inst.publicIp || inst.eipAddress || '暂无公网 IP' }}</span></label>
+                                        <p v-if="!statusInstances.length" class="settings-hint">当前没有实例，请先同步云端实例。</p>
+                                        <p class="settings-hint">勾选的机器不会被定时检测，也不会被自动更换 IP；手动点「更换 IP」不受影响。</p>
+                                    </fieldset>
                                 </div>
                             </section>
 
@@ -7704,7 +7710,8 @@
                         probe_token: '',
                         port: 22,
                         max_swaps: 5,
-                        auto_interval: 20
+                        auto_interval: 20,
+                        auto_exclude: []
                     },
                     Notification: {
                         email_enabled: true,
@@ -8518,7 +8525,8 @@
                         probe_token: payload?.IpCheck?.probe_token || '',
                         port: Number(payload?.IpCheck?.port) || 22,
                         max_swaps: Number(payload?.IpCheck?.max_swaps) || 5,
-                        auto_interval: Number.isFinite(Number(payload?.IpCheck?.auto_interval)) ? Number(payload.IpCheck.auto_interval) : 20
+                        auto_interval: Number.isFinite(Number(payload?.IpCheck?.auto_interval)) ? Number(payload.IpCheck.auto_interval) : 20,
+                        auto_exclude: [...(payload?.IpCheck?.auto_exclude || [])]
                     };
                     next.Accounts = Array.isArray(payload?.Accounts) ? payload.Accounts.map((item) => ({
                         ...createDefaultAccount(),

@@ -40,9 +40,9 @@ func (s *Server) RunIPWatch(ctx context.Context) {
 }
 
 // ipWatchCandidate reports whether the scheduled check should look at a and
-// could swap its IP if it is blocked.
-func (s *Server) ipWatchCandidate(a app.Account, now time.Time) bool {
-	if a.InstanceID == "" || a.IsDeleted != 0 || a.CloudPresence == "missing" || a.InstanceStatus != "Running" {
+// could swap its IP if it is blocked. Excluded machines are not even checked.
+func (s *Server) ipWatchCandidate(cfg ipCheckSettings, a app.Account, now time.Time) bool {
+	if a.InstanceID == "" || cfg.Exclude[dns.InstanceKey(a)] || a.IsDeleted != 0 || a.CloudPresence == "missing" || a.InstanceStatus != "Running" {
 		return false
 	}
 	if !dns.IsPublicIPv4(a.PublicIP) || s.Store.InstanceExpiry(a.InstanceID).Expired(now) {
@@ -62,7 +62,7 @@ func (s *Server) ipWatchRound(ctx context.Context, cfg ipCheckSettings, now time
 		if ctx.Err() != nil {
 			return
 		}
-		if !s.ipWatchCandidate(a, now) {
+		if !s.ipWatchCandidate(cfg, a, now) {
 			continue
 		}
 		if _, busy := s.ipReplacing.Load(a.ID); busy {

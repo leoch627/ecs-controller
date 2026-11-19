@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,7 +53,9 @@ type ipCheckSettings struct {
 	MaxSwaps int
 	// Interval is the scheduled check's period in minutes; 0 is off.
 	Interval int
-	HTTP     *http.Client
+	// Exclude holds dns.InstanceKey values the scheduled check skips.
+	Exclude map[string]bool
+	HTTP    *http.Client
 }
 
 func (c ipCheckSettings) enabled() bool { return c.ProbeURL != "" && c.Token != "" }
@@ -61,13 +66,31 @@ func (c ipCheckSettings) probe() reach.Client {
 
 func (s *Server) ipCheckSettings() ipCheckSettings {
 	token, _ := s.Store.OpenSecret(s.Store.GetSetting("ipcheck_probe_token", ""))
-	return ipCheckSettings{
+	cfg := ipCheckSettings{
 		ProbeURL: strings.TrimSpace(s.Store.GetSetting("ipcheck_probe_url", "")),
 		Token:    token,
 		Port:     clampInt(s.Store.GetSetting("ipcheck_port", ""), ipCheckDefaultPort, 1, 65535),
 		MaxSwaps: clampInt(s.Store.GetSetting("ipcheck_max_swaps", ""), ipCheckDefaultMaxSwaps, 1, ipCheckSwapLimit),
 		Interval: clampInt(s.Store.GetSetting("ipcheck_auto_interval", ""), ipCheckDefaultInterval, 0, ipCheckIntervalLimit),
+		Exclude:  map[string]bool{},
 	}
+	var exclude []string
+	_ = json.Unmarshal([]byte(s.Store.GetSetting("ipcheck_auto_exclude", "[]")), &exclude)
+	for _, key := range exclude {
+		cfg.Exclude[key] = true
+	}
+	return cfg
+}
+
+var instanceKeyPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func excludeList(keys map[string]bool) []string {
+	list := make([]string, 0, len(keys))
+	for key := range keys {
+		list = append(list, key)
+	}
+	sort.Strings(list)
+	return list
 }
 
 func clampInt(raw string, fallback, low, high int) int {
@@ -80,7 +103,7 @@ func clampInt(raw string, fallback, low, high int) int {
 
 func (s *Server) ipCheckConfig() map[string]any {
 	cfg := s.ipCheckSettings()
-	return map[string]any{"probe_url": cfg.ProbeURL, "probe_token": masked(s.Store.GetSetting("ipcheck_probe_token", "")), "port": cfg.Port, "max_swaps": cfg.MaxSwaps, "auto_interval": cfg.Interval}
+	return map[string]any{"probe_url": cfg.ProbeURL, "probe_token": masked(s.Store.GetSetting("ipcheck_probe_token", "")), "port": cfg.Port, "max_swaps": cfg.MaxSwaps, "auto_interval": cfg.Interval, "auto_exclude": excludeList(cfg.Exclude)}
 }
 
 func validProbeURL(raw string) error {
@@ -114,7 +137,24 @@ func (s *Server) saveIPCheckConfig(data map[string]any) error {
 	if interval < 0 || interval > ipCheckIntervalLimit {
 		return fmt.Errorf("定时检测间隔必须在 0 到 %d 分钟之间", ipCheckIntervalLimit)
 	}
-	for key, value := range map[string]string{"ipcheck_probe_url": probeURL, "ipcheck_port": strconv.Itoa(port), "ipcheck_max_swaps": strconv.Itoa(maxSwaps), "ipcheck_auto_interval": strconv.Itoa(interval)} {
+	values := map[string]string{"ipcheck_probe_url": probeURL, "ipcheck_port": strconv.Itoa(port), "ipcheck_max_swaps": strconv.Itoa(maxSwaps), "ipcheck_auto_interval": strconv.Itoa(interval)}
+	if raw, ok := data["auto_exclude"]; ok {
+		list, _ := raw.([]any)
+		if raw != nil && list == nil {
+			return fmt.Errorf("不自动更换的实例必须是列表")
+		}
+		keys := map[string]bool{}
+		for _, item := range list {
+			key, _ := item.(string)
+			if !instanceKeyPattern.MatchString(key) {
+				return fmt.Errorf("不自动更换的实例无效")
+			}
+			keys[key] = true
+		}
+		encoded, _ := json.Marshal(excludeList(keys))
+		values["ipcheck_auto_exclude"] = string(encoded)
+	}
+	for key, value := range values {
 		if err := s.Store.SetSetting(key, value); err != nil {
 			return err
 		}
