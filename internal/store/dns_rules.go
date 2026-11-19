@@ -64,8 +64,8 @@ func (s *Store) SaveDNSSettings(values map[string]string, retired []DNSBinding) 
 }
 
 // restoreInstanceDNS undoes an earlier migration that retired the per-machine
-// rules into ddns_retired_instance_rules: those rules go back into the active
-// list so each machine's own A record follows its IP again.
+// rules into ddns_retired_instance_rules: each rule comes back limited to the
+// machines that have a custom name, so those records follow their IP again.
 func (s *Store) restoreInstanceDNS() error {
 	raw := s.GetSetting("ddns_retired_instance_rules", "")
 	if raw == "" {
@@ -76,9 +76,26 @@ func (s *Store) restoreInstanceDNS() error {
 		_, err = s.DB.Exec(`DELETE FROM settings WHERE key='ddns_retired_instance_rules'`)
 		return err
 	}
+	// Only machines the user named explicitly get their record back; the old
+	// rule must not hand every other machine an automatic name again.
+	accounts, err := s.LoadAccounts(false)
+	if err != nil {
+		return err
+	}
 	restored := map[string]bool{}
-	for _, rule := range retired {
+	for i, rule := range retired {
 		restored[rule.ID] = rule.Kind == "instance"
+		keys := []string{}
+		for _, account := range accounts {
+			if rule.Scope.Matches(account) && s.CustomDNSName(account) != "" {
+				keys = append(keys, dns.InstanceKey(account))
+			}
+		}
+		if len(keys) == 0 {
+			retired[i].Enabled = false
+		} else {
+			retired[i].Scope = dns.MachineScope{Mode: "instances", InstanceKeys: keys}
+		}
 	}
 	// The retired copy wins over a same-ID rule, which that migration disabled.
 	rules := []dns.Rule{}

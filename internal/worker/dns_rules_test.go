@@ -187,6 +187,10 @@ func TestUpgradeRestoresRetiredInstanceRules(t *testing.T) {
 	if err := s.SetCustomDNSName(aws, "api-hnd"); err != nil {
 		t.Fatal(err)
 	}
+	ali := app.Account{ID: 3, AccessKeyID: "ali", RegionID: "cn-hongkong", SiteType: "international", Remark: "hk", InstanceID: "i-ali", InstanceStatus: "Running", PublicIP: "47.1.1.1"}
+	if err := s.UpsertAccount(ali); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +215,14 @@ func TestUpgradeRestoresRetiredInstanceRules(t *testing.T) {
 	if got := poolRecords(cf, "api-hnd.example.com"); got != "13.193.97.141" {
 		t.Fatalf("custom AWS name did not follow the new IP: %s", got)
 	}
-	if got := poolRecords(cf, "loadbalance.example.com"); got != "" {
-		t.Fatalf("AWS machine joined the Alibaba Cloud pool: %s", got)
+	if got := poolRecords(cf, "loadbalance.example.com"); got != "47.1.1.1" {
+		t.Fatalf("pool: %s", got)
+	}
+	w.SyncAccountDNS(context.Background(), ali.ID)
+	if !w.syncAllInstanceDNS(context.Background()) {
+		t.Fatal("reconcile failed")
+	}
+	if got := poolRecords(cf, "hk.example.com"); got != "" {
+		t.Fatalf("machine without a custom name got an automatic record: %s", got)
 	}
 }
