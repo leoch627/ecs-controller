@@ -32,9 +32,9 @@ func (s *Server) dnsConfig() map[string]any {
 		}
 		credentials[info.ID] = values
 	}
-	rules := append([]dns.Rule{}, settings.EffectiveRules()...)
+	domains := append([]dns.Domain{}, settings.Domains...)
 	return map[string]any{
-		"rules":           rules,
+		"domains":         domains,
 		"cleanup_enabled": settings.CleanupEnabled,
 		"provider":        settings.Provider,
 		"domain":          settings.Domain,
@@ -47,32 +47,28 @@ func (s *Server) dnsConfig() map[string]any {
 func (s *Server) saveDNSConfig(ddns map[string]any) error {
 	s.Store.DNSConfigMu.Lock()
 	defer s.Store.DNSConfigMu.Unlock()
-	previous := dns.LoadSettings(s.Store.GetSetting, s.Store.OpenSecret)
 	values := map[string]string{
 		"ddns_enabled": "0", "dns_cleanup_enabled": bool01(ddns["cleanup_enabled"]),
-		// Let the next monitor pass write every machine's own record.
-		"last_ddns_reconcile": "0",
-		"ddns_provider":       dns.NormalizeID(stringValue(ddns["provider"])),
-		"ddns_domain":         dns.NormalizeDomain(stringValue(ddns["domain"])),
-		"ddns_pool_name":      dns.NormalizeDomain(stringValue(ddns["pool_name"])),
+		"ddns_provider":  dns.NormalizeID(stringValue(ddns["provider"])),
+		"ddns_domain":    dns.NormalizeDomain(stringValue(ddns["domain"])),
+		"ddns_pool_name": dns.NormalizeDomain(stringValue(ddns["pool_name"])),
 	}
-	if raw, exists := ddns["rules"]; exists {
+	if raw, exists := ddns["domains"]; exists {
 		encoded, err := json.Marshal(raw)
 		if err != nil {
 			return err
 		}
-		rules := []dns.Rule{}
-		if string(encoded) == "null" {
-			return fmt.Errorf("解析规则必须是列表，关闭全部规则请传空列表")
+		domains := []dns.Domain{}
+		if string(encoded) != "null" {
+			if err := json.Unmarshal(encoded, &domains); err != nil {
+				return fmt.Errorf("根域名格式无效: %w", err)
+			}
 		}
-		if err := json.Unmarshal(encoded, &rules); err != nil {
-			return fmt.Errorf("解析规则格式无效: %w", err)
-		}
-		if err := dns.ValidateRules(rules); err != nil {
+		if err := dns.ValidateDomains(domains); err != nil {
 			return err
 		}
-		encoded, _ = json.Marshal(rules)
-		values["ddns_rules"] = string(encoded)
+		encoded, _ = json.Marshal(domains)
+		values["ddns_domains"] = string(encoded)
 	}
 	credentials, _ := ddns["credentials"].(map[string]any)
 	if credentials == nil {
@@ -116,32 +112,31 @@ func (s *Server) saveDNSConfig(ddns map[string]any) error {
 		}
 		return s.Store.GetSetting(key, fallback)
 	}, s.Store.OpenSecret)
+	for _, domain := range draft.Domains {
+		if !draft.ForDomain(domain).Configured() {
+			return fmt.Errorf("%s 的 %s 凭据没有填写完整", domain.Domain, dns.Lookup(domain.Provider).Label)
+		}
+	}
+	// A root domain still used by a machine cannot go away, or its records
+	// could neither be updated nor deleted.
 	accounts, err := s.Store.LoadAccounts(false)
 	if err != nil {
 		return err
 	}
-	if draft.RulesConfigured {
-		for _, rule := range draft.Rules {
-			if rule.Enabled && !draft.ForRule(rule).Configured() {
-				return fmt.Errorf("%s 的 %s 凭据没有填写完整", rule.Domain, dns.Lookup(rule.Provider).Label)
+	hosts := s.Store.DNSHosts()
+	for _, account := range accounts {
+		for _, name := range hosts[dns.InstanceKey(account)] {
+			if _, ok := draft.DomainFor(name); !ok {
+				return fmt.Errorf("%s 的解析名称 %s 不在任何根域名下，请先在实例管理里删除这个名称", accountDisplay(account), name)
 			}
 		}
 	}
-	bindings := s.Store.DNSBindings(draft, accounts)
-	names, keys := map[string]bool{}, map[string]bool{}
-	for _, binding := range bindings {
-		if names[binding.Name] {
-			return fmt.Errorf("解析名称 %s 重复，负载均衡名称不能和单机解析名称相同", binding.Name)
-		}
-		names[binding.Name], keys[binding.Key()] = true, true
-	}
-	retired := []store.DNSBinding{}
-	for _, binding := range s.Store.DNSBindings(previous, accounts) {
-		if !keys[binding.Key()] {
-			retired = append(retired, binding)
+	for name := range s.Store.DNSManaged() {
+		if _, ok := draft.DomainFor(name); !ok {
+			return fmt.Errorf("解析 %s 还在等待删除，请稍后再移除它的根域名", name)
 		}
 	}
-	return s.Store.SaveDNSSettings(values, retired)
+	return s.Store.SaveDNSSettings(values)
 }
 
 // testDNS checks the form's (possibly unsaved) provider settings. Masked
@@ -170,19 +165,19 @@ func (s *Server) testDNS(w http.ResponseWriter, data map[string]any) {
 		}
 	}
 	settings.Credentials[info.ID] = cfg
-	if raw, ok := data["rule"]; ok {
+	if raw, ok := data["domain_config"]; ok {
 		encoded, _ := json.Marshal(raw)
-		var rule dns.Rule
-		if err := json.Unmarshal(encoded, &rule); err != nil {
-			s.error(w, 400, "解析规则格式无效")
+		var domain dns.Domain
+		if err := json.Unmarshal(encoded, &domain); err != nil {
+			s.error(w, 400, "根域名格式无效")
 			return
 		}
-		rules := []dns.Rule{rule}
-		if err := dns.ValidateRules(rules); err != nil {
+		domains := []dns.Domain{domain}
+		if err := dns.ValidateDomains(domains); err != nil {
 			s.error(w, 400, err.Error())
 			return
 		}
-		settings = settings.ForRule(rules[0])
+		settings = settings.ForDomain(domains[0])
 	}
 
 	service, err := dns.NewService(settings, s.DNSClient)

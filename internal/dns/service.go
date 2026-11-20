@@ -12,6 +12,10 @@ import (
 
 // Settings is the saved DNS configuration, with secrets already decrypted.
 type Settings struct {
+	// Domains are the root domains machines can take names under.
+	Domains []Domain
+	// Rules and RulesConfigured are the older rule-based configuration,
+	// read only to migrate it.
 	Rules           []Rule
 	RulesConfigured bool
 	Provider        string
@@ -47,6 +51,9 @@ func LoadSettings(get func(key, fallback string) string, open func(string) (stri
 			cfg[field.Key] = value
 		}
 		settings.Credentials[info.ID] = cfg
+	}
+	if raw := get("ddns_domains", ""); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &settings.Domains)
 	}
 	if raw := get("ddns_rules", ""); raw != "" {
 		settings.RulesConfigured = true

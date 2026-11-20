@@ -170,6 +170,7 @@ func TestDNSCleanupHistoryAndRetryRequireCSRF(t *testing.T) {
 	resp.Body.Close()
 
 	_ = st.SetSetting("dns_cleanup_enabled", "1")
+	_ = st.SetSetting("ddns_domains", `[{"id":"d1","provider":"cloudflare","domain":"example.com"}]`)
 	if _, err := st.EnqueueDNSCleanup("47.1.1.1", "i-old", "hk", "expired"); err != nil {
 		t.Fatal(err)
 	}

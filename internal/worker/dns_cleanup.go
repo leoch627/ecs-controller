@@ -35,28 +35,14 @@ func (w *Worker) dnsCleanupJob(ctx context.Context, job *store.Job) error {
 		w.Store.AddLog("info", fmt.Sprintf("解析清理已跳过 %s：仍被实例 %s 使用", payload.IP, user))
 		return w.finishDNSCleanup(job, DNSCleanupResult{Outcome: "skipped", Message: "IP 仍被实例 " + user + " 使用，已跳过"})
 	}
+	// The configured root domains are searched; without any, the legacy
+	// root domain (or every zone the credentials can see) is.
 	scopes := []dns.Settings{settings}
-	if settings.RulesConfigured || payload.Rules != nil {
-		scopes = nil
-		seen := map[string]bool{}
-		rules := settings.EffectiveRules()
-		if payload.Rules != nil {
-			rules = *payload.Rules
+	if len(settings.Domains) > 0 {
+		scopes = scopes[:0]
+		for _, domain := range settings.Domains {
+			scopes = append(scopes, settings.ForDomain(domain))
 		}
-		for _, rule := range rules {
-			if !rule.Enabled {
-				continue
-			}
-			key := rule.Provider + "|" + rule.Domain + "|" + rule.ZoneID
-			if !seen[key] {
-				scopes = append(scopes, settings.ForRule(rule))
-				seen[key] = true
-			}
-		}
-	}
-	custom, err := w.Store.CustomDNSLabels()
-	if err != nil {
-		return err
 	}
 	cleanupCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -66,7 +52,7 @@ func (w *Worker) dnsCleanupJob(ctx context.Context, job *store.Job) error {
 		if err != nil {
 			return err
 		}
-		current, err := service.RemoveIP(cleanupCtx, payload.IP, custom...)
+		current, err := service.RemoveIP(cleanupCtx, payload.IP)
 		changes = append(changes, current...)
 		if err != nil {
 			w.Store.AddLog("warning", fmt.Sprintf("解析清理失败 [%s] %s（第 %d 次）：%v", payload.Label, payload.IP, job.Attempts, err))

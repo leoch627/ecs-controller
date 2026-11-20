@@ -2,47 +2,18 @@ package store
 
 import (
 	"encoding/json"
-	"fmt"
-	"time"
 
-	"github.com/Kori1c/ecs-controller/internal/app"
 	"github.com/Kori1c/ecs-controller/internal/dns"
 )
 
+// DNSBinding is a name an older version queued for deletion.
 type DNSBinding struct {
 	Rule dns.Rule `json:"rule"`
 	Name string   `json:"name"`
 }
 
-func (b DNSBinding) Key() string {
-	// Switching between automatic zone lookup and an explicit zone ID must
-	// not delete the replacement record at the same provider and name.
-	return b.Rule.Provider + "|" + b.Name
-}
-
-func (s *Store) DNSBindings(settings dns.Settings, accounts []app.Account) []DNSBinding {
-	result := []DNSBinding{}
-	for _, rule := range settings.EffectiveRules() {
-		if rule.Enabled && rule.Kind == "pool" {
-			result = append(result, DNSBinding{rule, rule.FQDN()})
-		}
-	}
-	for _, account := range accounts {
-		if rule, ok := settings.InstanceRule(account); ok {
-			name := s.DDNSNameForDomain(account, accounts, s.CustomDNSName(account), rule.Domain)
-			result = append(result, DNSBinding{rule, name})
-		}
-	}
-	return result
-}
-
-// SaveDNSSettings commits the configuration and its obsolete-record cleanup
-// together, so an interrupted save cannot strand records in the old domain.
-func (s *Store) SaveDNSSettings(values map[string]string, retired []DNSBinding) error {
-	raw, err := json.Marshal(retired)
-	if err != nil {
-		return err
-	}
+// SaveDNSSettings commits the DNS settings together.
+func (s *Store) SaveDNSSettings(values map[string]string) error {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
@@ -50,13 +21,6 @@ func (s *Store) SaveDNSSettings(values map[string]string, retired []DNSBinding) 
 	defer tx.Rollback()
 	for key, value := range values {
 		if _, err := tx.Exec(`INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value); err != nil {
-			return err
-		}
-	}
-	if len(retired) > 0 {
-		now := time.Now().Unix()
-		id := fmt.Sprintf("dns-rules-%d", time.Now().UnixNano())
-		if _, err := tx.Exec(`INSERT INTO jobs(job_id,kind,entity_key,status,payload,attempts,available_at,created_at,updated_at) VALUES(?,?,?,'queued',?,0,?,?,?)`, id, "dns_rule_cleanup", id, string(raw), now, now, now); err != nil {
 			return err
 		}
 	}

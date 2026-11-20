@@ -101,7 +101,8 @@ func newCleanupWorker(t *testing.T, cf *fakeCloudflare) (*Worker, *store.Store) 
 	}
 	t.Cleanup(func() { s.Close() })
 	token, _ := s.Seal("cf-test-token")
-	for key, value := range map[string]string{"dns_cleanup_enabled": "1", "ddns_provider": "cloudflare", "ddns_domain": "example.com", "ddns_cf_token": token} {
+	domains := `[{"id":"d1","provider":"cloudflare","domain":"example.com"}]`
+	for key, value := range map[string]string{"dns_cleanup_enabled": "1", "ddns_provider": "cloudflare", "ddns_domain": "example.com", "ddns_cf_token": token, "ddns_domains": domains} {
 		if err := s.SetSetting(key, value); err != nil {
 			t.Fatal(err)
 		}
@@ -222,6 +223,7 @@ func TestReleasingInstanceQueuesDNSCleanup(t *testing.T) {
 	}
 	defer s.Close()
 	_ = s.SetSetting("dns_cleanup_enabled", "1")
+	_ = s.SetSetting("ddns_domains", `[{"id":"d1","provider":"cloudflare","domain":"example.com"}]`)
 	if err := s.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-test", GroupKey: "g", InstanceID: "i-delete", InstanceStatus: "Stopped", PublicIP: "47.1.1.7"}); err != nil {
 		t.Fatal(err)
 	}
@@ -237,21 +239,5 @@ func TestReleasingInstanceQueuesDNSCleanup(t *testing.T) {
 	jobs, _ := s.ListJobs(store.DNSCleanupKind, 10)
 	if len(jobs) != 1 || jobs[0].EntityKey != "47.1.1.7" || !strings.Contains(jobs[0].Payload, `"released"`) {
 		t.Fatalf("release should queue the IP for cleanup, got %+v", jobs)
-	}
-}
-
-func TestDNSCleanupPreservesExplicitInstanceHostname(t *testing.T) {
-	cf := &fakeCloudflare{records: map[string]string{
-		"api": "api-nrt.example.com 47.1.1.1", "stale": "legacy.example.com 47.1.1.1",
-	}}
-	w, s := newCleanupWorker(t, cf)
-	if err := s.SetCustomDNSName(app.Account{InstanceID: "i-old"}, "api-nrt"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runCleanup(t, w, s, "47.1.1.1"); err != nil {
-		t.Fatal(err)
-	}
-	if cf.records["api"] == "" || cf.records["stale"] != "" {
-		t.Fatalf("expected cleanup to preserve the custom name only: %+v", cf.records)
 	}
 }

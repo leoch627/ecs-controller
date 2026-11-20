@@ -102,6 +102,10 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("restore instance DNS: %w", err)
 	}
+	if err := s.migrateDNSHosts(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate DNS names: %w", err)
+	}
 	return s, nil
 }
 

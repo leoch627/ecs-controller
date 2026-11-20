@@ -130,7 +130,10 @@ func (s *Store) RestoreSnapshot(path string, encryptionKey [32]byte) error {
 		return fmt.Errorf("detach restore snapshot: %w", err)
 	}
 	detached = true
-	return s.restoreInstanceDNS()
+	if err := s.restoreInstanceDNS(); err != nil {
+		return err
+	}
+	return s.migrateDNSHosts()
 }
 
 // BackupTables returns a copy for manifest and compatibility checks outside the

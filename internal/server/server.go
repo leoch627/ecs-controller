@@ -375,7 +375,7 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 	case "check_instance_ip":
 		s.checkInstanceIP(r.Context(), w, data)
 	case "set_instance_dns_name":
-		s.setInstanceDNSName(w, data)
+		s.setInstanceDNSNames(w, data)
 	case "test_ip_probe":
 		s.testIPProbe(w, data)
 	case "refresh_account", "sync_account_group", "restore_schedule_block":
@@ -746,8 +746,16 @@ func (s *Server) status(w http.ResponseWriter) {
 	accounts, _ := s.Store.LoadAccounts(false)
 	expiries := s.Store.ExpiryByInstance()
 	ipChecks := s.Store.IPChecks()
-	dnsSettings := dns.LoadSettings(s.Store.GetSetting, nil)
-	ddnsActive := false
+	ddnsActive := len(dns.LoadSettings(s.Store.GetSetting, nil).Domains) > 0
+	hosts := s.Store.DNSHosts()
+	holders := map[string]int{}
+	for _, a := range accounts {
+		if a.InstanceID != "" {
+			for _, name := range hosts[dns.InstanceKey(a)] {
+				holders[name]++
+			}
+		}
+	}
 	data := make([]map[string]any, 0)
 	for _, a := range accounts {
 		if a.InstanceID == "" {
@@ -765,11 +773,11 @@ func (s *Server) status(w http.ResponseWriter) {
 		item := data[len(data)-1]
 		item["siteType"] = a.SiteType
 		item["dnsInstanceKey"] = dns.InstanceKey(a)
-		if rule, ok := dnsSettings.InstanceRule(a); ok {
-			ddnsActive = true
-			item["dnsName"] = s.Store.InstanceDNSName(a, accounts, rule.Domain)
-			item["dnsCustom"] = s.Store.CustomDNSName(a) != ""
+		names := make([]map[string]any, 0)
+		for _, name := range hosts[dns.InstanceKey(a)] {
+			names = append(names, map[string]any{"name": name, "holders": holders[name]})
 		}
+		item["dnsNames"] = names
 		_, item["ipReplacing"] = s.ipReplacing.Load(a.ID)
 		// A result for an earlier IP says nothing about the current one.
 		if check, ok := ipChecks[a.ID]; ok && check.IP != "" && check.IP == a.PublicIP {

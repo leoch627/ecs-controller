@@ -71,21 +71,6 @@ func (s *Store) enqueueDNSCleanup(ip, instanceID, label, reason string, owner *a
 		return false, nil
 	}
 	payload := DNSCleanupPayload{IP: ip, InstanceID: instanceID, Label: label, Reason: reason}
-	settings := dns.LoadSettings(s.GetSetting, nil)
-	if settings.RulesConfigured {
-		selected := []dns.Rule{}
-		if owner != nil {
-			for _, rule := range settings.EffectiveRules() {
-				if rule.Enabled && rule.Scope.Matches(*owner) {
-					selected = append(selected, rule)
-				}
-			}
-		}
-		if len(selected) == 0 {
-			return false, nil
-		}
-		payload.Rules = &selected
-	}
 	jobID := fmt.Sprintf("dns-cleanup-%s-%d", ip, time.Now().UnixNano())
 	if err := s.EnqueueJob(jobID, DNSCleanupKind, ip, payload); err != nil {
 		return false, err
