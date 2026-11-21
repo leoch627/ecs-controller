@@ -1,7 +1,6 @@
 package notify
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -146,61 +145,6 @@ func (c *TelegramClient) GetUpdates(ctx context.Context, offset int64) ([]map[st
 		return nil, err
 	}
 	return updates, nil
-}
-
-func Webhook(ctx context.Context, endpoint, method, contentType string, headers map[string]string, body any) error {
-	if endpoint == "" {
-		return fmt.Errorf("webhook URL 不能为空")
-	}
-	var data []byte
-	var err error
-	if strings.EqualFold(contentType, "form") {
-		values := url.Values{}
-		if fields, ok := body.(map[string]string); ok {
-			for k, v := range fields {
-				values.Set(k, v)
-			}
-		}
-		data = []byte(values.Encode())
-	} else {
-		data, err = json.Marshal(body)
-		if err != nil {
-			return err
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, methodOrDefault(method), endpoint, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	if contentType == "" || strings.EqualFold(contentType, "json") {
-		req.Header.Set("Content-Type", "application/json")
-	} else {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("webhook 返回 HTTP %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func Telegram(ctx context.Context, token, chatID, message string) error {
-	if chatID == "" {
-		return fmt.Errorf("Telegram token/chat_id 不能为空")
-	}
-	client, err := NewTelegramClient(token, "", "", "", "", "", "")
-	if err != nil {
-		return err
-	}
-	return client.SendMessage(ctx, chatID, message, nil)
 }
 
 func Email(ctx context.Context, host string, port int, username, password, from, to, subject, body, secure string) error {
