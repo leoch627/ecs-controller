@@ -1241,11 +1241,6 @@ func mustSeal(s *Store, value string) string {
 	return sealed
 }
 
-func (s *Store) UpdateLastKeepAlive(id int64, at int64) error {
-	_, err := s.DB.Exec(`UPDATE accounts SET last_keep_alive_at=? WHERE id=?`, at, id)
-	return err
-}
-
 func (s *Store) SaveGroups(groups []app.AccountGroup) error {
 	copyGroups := make([]app.AccountGroup, len(groups))
 	copy(copyGroups, groups)
