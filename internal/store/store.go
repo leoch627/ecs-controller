@@ -33,8 +33,6 @@ type Store struct {
 	DNSConfigMu sync.Mutex
 }
 
-var ErrAccountNotObservable = errors.New("account cannot be marked missing")
-
 type Job struct {
 	ID          int64
 	JobID       string
@@ -962,10 +960,6 @@ func boolInt(value bool) int {
 	return 0
 }
 
-func (s *Store) MarkDeleted(id int64) error {
-	_, err := s.DB.Exec(`UPDATE accounts SET is_deleted=1,cloud_presence='retired_local',access_key_secret='' WHERE id=?`, id)
-	return err
-}
 func (s *Store) MarkReleasing(id int64) error {
 	_, err := s.DB.Exec(`UPDATE accounts SET instance_status='Releasing',updated_at=? WHERE id=? AND is_deleted=0`, time.Now().Unix(), id)
 	return err
@@ -1042,60 +1036,6 @@ func (s *Store) PhysicallyDeleteReleaseFailed(id int64) (bool, error) {
 		return false, err
 	}
 	if err := s.DeleteInstanceData(id); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (s *Store) ObserveAccountMissing(id int64, observedAt time.Time) (int, int64, error) {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return 0, 0, err
-	}
-	rollback := func(cause error) (int, int64, error) {
-		_ = tx.Rollback()
-		return 0, 0, cause
-	}
-	at := observedAt.Unix()
-	result, err := tx.Exec(`UPDATE accounts SET
-		missing_count=missing_count+1,
-		missing_since=CASE WHEN missing_since=0 THEN ? ELSE missing_since END,
-		cloud_presence='missing',instance_status='Missing',health_status='warning',
-		traffic_api_status='unknown',traffic_api_message='云端实例不存在，等待再次确认',
-		protection_suspended=1,protection_suspend_reason='instance_missing',updated_at=?
-		WHERE id=? AND is_deleted=0 AND instance_status NOT IN ('Releasing','ReleaseFailed')`, at, at, id)
-	if err != nil {
-		return rollback(err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return rollback(err)
-	}
-	if changed == 0 {
-		return rollback(ErrAccountNotObservable)
-	}
-	var count int
-	var since int64
-	if err := tx.QueryRow(`SELECT missing_count,missing_since FROM accounts WHERE id=?`, id).Scan(&count, &since); err != nil {
-		return rollback(err)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, 0, err
-	}
-	return count, since, nil
-}
-
-func (s *Store) RetireMissingAccount(id int64, missingBefore time.Time) (bool, error) {
-	var matched int64
-	err := s.DB.QueryRow(`SELECT id FROM accounts WHERE id=? AND is_deleted=0 AND cloud_presence='missing'
-		AND missing_count>=2 AND missing_since>0 AND missing_since<=?`, id, missingBefore.Unix()).Scan(&matched)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if err := s.DeleteInstanceData(matched); err != nil {
 		return false, err
 	}
 	return true, nil
