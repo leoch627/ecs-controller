@@ -2111,14 +2111,6 @@ func remoteIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
-func expectedOrigin(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
-}
-
 func sameOriginHost(origin, requestHost string) bool {
 	origin = strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://")
 	return strings.EqualFold(strings.TrimSuffix(origin, "/"), requestHost)
