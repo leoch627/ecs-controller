@@ -109,15 +109,6 @@ func NewService(settings Settings, client *http.Client) (*Service, error) {
 	return &Service{settings: settings, info: info, cfg: cfg, provider: provider}, nil
 }
 
-// NewServiceWithProvider is used by tests to inject a fake provider.
-func NewServiceWithProvider(settings Settings, provider Provider) *Service {
-	info, cfg := settings.Current()
-	return &Service{settings: settings, info: info, cfg: cfg, provider: provider}
-}
-
-// Label is the provider's display name.
-func (s *Service) Label() string { return s.info.Label }
-
 // Zones lists domains available to the current provider credentials.
 func (s *Service) Zones(ctx context.Context) ([]Zone, error) { return s.provider.ListZones(ctx) }
 
