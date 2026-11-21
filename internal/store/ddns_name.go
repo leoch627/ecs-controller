@@ -32,25 +32,6 @@ func (s *Store) CustomDNSName(account app.Account) string {
 	return name
 }
 
-// CustomDNSLabels includes explicitly assigned names even after an instance
-// disappears. Cleanup must preserve those names on retry and after removal.
-func (s *Store) CustomDNSLabels() ([]string, error) {
-	rows, err := s.DB.Query(`SELECT DISTINCT name FROM dns_names WHERE name <> ''`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		names = append(names, name)
-	}
-	return names, rows.Err()
-}
-
 // SetCustomDNSName stores the instance's chosen name; "" goes back to the
 // automatic one.
 func (s *Store) SetCustomDNSName(account app.Account, name string) error {
