@@ -23,6 +23,16 @@ import (
 // Alibaba Cloud ECS. It shares the site_type column with china/international.
 const SiteAWS = "aws"
 
+// ProtectionThreshold is the usage percent at which traffic protection acts.
+// Lightsail overage is cheap, so AWS instances run to the full allowance and
+// the configured threshold applies only to Alibaba Cloud.
+func ProtectionThreshold(siteType string, configured float64) float64 {
+	if siteType == SiteAWS {
+		return 100
+	}
+	return configured
+}
+
 // NewClient picks the cloud backend for an account's site type.
 func NewClient(accessKey, secret, region, siteType string) Client {
 	if siteType == SiteAWS {

@@ -920,10 +920,47 @@ func (s *Service) GetOutboundTrafficDelta(ctx context.Context, region, instanceI
 	return 0, startMS, 0, "", lastErr
 }
 
+// GetInstanceMonthlyTraffic sums hourly CMS buckets that have finished and
+// fills the rest of the window, up to endMS, from per-minute datapoints.
+// Hourly buckets only appear after their hour ends, so without the minute
+// tail a burst could run for over an hour before traffic protection saw it.
 func (s *Service) GetInstanceMonthlyTraffic(ctx context.Context, region, instanceID, publicIP string, startMS, endMS int64) (float64, int, error) {
 	if endMS <= startMS {
 		return 0, 0, nil
 	}
+	hourBytes, coveredMS, hourCount, hourErr := s.completedHourlyTraffic(ctx, instanceID, publicIP, startMS, endMS)
+	// Minute datapoints are stamped at the start of their minute, like hourly
+	// ones; start just before the first uncovered minute so it is counted.
+	minuteFrom := startMS
+	if hourCount > 0 {
+		minuteFrom = coveredMS - 1
+	}
+	var minuteBytes float64
+	minuteCount := 0
+	var minuteErr error
+	if minuteFrom < endMS {
+		minuteBytes, _, minuteCount, _, minuteErr = s.GetOutboundTrafficDelta(ctx, region, instanceID, publicIP, minuteFrom, endMS)
+	}
+	if hourCount+minuteCount > 0 {
+		return hourBytes + minuteBytes, hourCount + minuteCount, nil
+	}
+	if hourErr != nil && !IsMetricNoDataError(hourErr) {
+		return 0, 0, hourErr
+	}
+	if minuteErr != nil {
+		return 0, 0, minuteErr
+	}
+	if hourErr != nil {
+		return 0, 0, hourErr
+	}
+	return 0, 0, fmt.Errorf("%w: CMS returned no traffic datapoints", ErrMetricNoData)
+}
+
+// completedHourlyTraffic sums the hourly buckets in (startMS, endMS] whose
+// hour has ended, and returns where the last of them ends. A bucket for the
+// hour still in progress is skipped: its average would be scaled to a full
+// hour, and the minute datapoints cover that hour instead.
+func (s *Service) completedHourlyTraffic(ctx context.Context, instanceID, publicIP string, startMS, endMS int64) (float64, int64, int, error) {
 	type candidate struct {
 		name       string
 		dimensions string
@@ -934,6 +971,7 @@ func (s *Service) GetInstanceMonthlyTraffic(ctx context.Context, region, instanc
 	}
 	var lastErr error
 	const periodSeconds = 3600
+	const periodMS = periodSeconds * 1000
 	for _, candidate := range candidates {
 		result, err := s.CMS.Call(ctx, "DescribeMetricList", map[string]string{
 			"Namespace":  "acs_ecs_dashboard",
@@ -954,10 +992,11 @@ func (s *Service) GetInstanceMonthlyTraffic(ctx context.Context, region, instanc
 			continue
 		}
 		var bytes float64
+		var covered int64
 		count := 0
 		for _, point := range points {
 			ts := int64(floatValue(point["timestamp"]))
-			if ts <= startMS || ts > endMS {
+			if ts <= startMS || ts+periodMS > endMS {
 				continue
 			}
 			rate := floatValue(point["Average"])
@@ -971,17 +1010,20 @@ func (s *Service) GetInstanceMonthlyTraffic(ctx context.Context, region, instanc
 				rate = 0
 			}
 			bytes += rate * periodSeconds / 8
+			if ts+periodMS > covered {
+				covered = ts + periodMS
+			}
 			count++
 		}
 		if count > 0 {
-			return bytes, count, nil
+			return bytes, covered, count, nil
 		}
-		lastErr = fmt.Errorf("%w: CMS metric %s returned no traffic datapoints", ErrMetricNoData, candidate.name)
+		lastErr = fmt.Errorf("%w: CMS metric %s returned no completed hourly datapoints", ErrMetricNoData, candidate.name)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("%w: CMS returned no traffic datapoints", ErrMetricNoData)
 	}
-	return 0, 0, lastErr
+	return 0, 0, 0, lastErr
 }
 
 func metricPoints(value any) ([]map[string]any, error) {

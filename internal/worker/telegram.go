@@ -318,7 +318,7 @@ func (w *Worker) telegramTraffic(ctx context.Context) string {
 		status := "正常"
 		if percent >= 100 {
 			status = "已超量"
-		} else if percent >= threshold {
+		} else if percent >= cloud.ProtectionThreshold(group.SiteType, threshold) {
 			status = "接近阈值"
 		}
 		lines = append(lines, fmt.Sprintf("📡 账号流量：%.2f GB / %.2f GB", traffic, group.MaxTraffic), fmt.Sprintf("📈 使用率：%.0f%%", percent), statusIconForTraffic(status)+" "+status)

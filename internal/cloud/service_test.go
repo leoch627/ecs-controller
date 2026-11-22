@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -180,21 +181,55 @@ func TestMetricNoDataErrorDoesNotMatchRegularAPIError(t *testing.T) {
 }
 
 func TestMonthlyTrafficUsesHourlyCMSData(t *testing.T) {
+	const hour = int64(3600 * 1000)
+	startMS, endMS := hour-1, 3*hour+30*60*1000
+	var minuteStart string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("Period") != "3600" {
-			t.Fatalf("monthly query used the wrong period: %s", r.URL.Query().Get("Period"))
-		}
-		if r.URL.Query().Get("StartTime") != "1000" || r.URL.Query().Get("EndTime") != "5000" {
-			t.Fatalf("monthly query used the wrong range: %s - %s", r.URL.Query().Get("StartTime"), r.URL.Query().Get("EndTime"))
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"Code":"200","Datapoints":"[{\"timestamp\":2000,\"Average\":8}]"}`))
+		switch r.URL.Query().Get("Period") {
+		case "3600":
+			if r.URL.Query().Get("StartTime") != strconv.FormatInt(startMS, 10) || r.URL.Query().Get("EndTime") != strconv.FormatInt(endMS, 10) {
+				t.Fatalf("monthly query used the wrong range: %s - %s", r.URL.Query().Get("StartTime"), r.URL.Query().Get("EndTime"))
+			}
+			// The bucket at 3h is the hour still in progress.
+			_, _ = fmt.Fprintf(w, `{"Code":"200","Datapoints":"[{\"timestamp\":%d,\"Average\":8},{\"timestamp\":%d,\"Average\":8},{\"timestamp\":%d,\"Average\":800}]"}`, hour, 2*hour, 3*hour)
+		case "60":
+			minuteStart = r.URL.Query().Get("StartTime")
+			_, _ = fmt.Fprintf(w, `{"Code":"200","Datapoints":"[{\"timestamp\":%d,\"Average\":8},{\"timestamp\":%d,\"Average\":8}]"}`, 3*hour, 3*hour+60*1000)
+		default:
+			t.Fatalf("unexpected period: %s", r.URL.Query().Get("Period"))
+		}
 	}))
 	defer server.Close()
 
 	service := &Service{CMS: &RPCClient{HTTPClient: server.Client(), Endpoint: server.URL, Version: "2019-01-01", Product: "Cms", AccessKey: "ak", Secret: "sk"}}
-	bytes, points, err := service.GetInstanceMonthlyTraffic(context.Background(), "cn-hongkong", "i-1", "203.0.113.10", 1000, 5000)
-	if err != nil || points != 1 || bytes != 3600 {
+	bytes, points, err := service.GetInstanceMonthlyTraffic(context.Background(), "cn-hongkong", "i-1", "203.0.113.10", startMS, endMS)
+	if err != nil || points != 4 || bytes != 2*3600+2*60 {
+		t.Fatalf("monthly traffic: bytes=%v points=%d err=%v", bytes, points, err)
+	}
+	if minuteStart != strconv.FormatInt(3*hour-1, 10) {
+		t.Fatalf("minute query should start where completed hours end, got %s", minuteStart)
+	}
+}
+
+func TestMonthlyTrafficCountsMinutesBeforeFirstHourCompletes(t *testing.T) {
+	const hour = int64(3600 * 1000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("Period") == "3600" {
+			_, _ = w.Write([]byte(`{"Code":"200","Datapoints":"[]"}`))
+			return
+		}
+		if r.URL.Query().Get("StartTime") != strconv.FormatInt(hour-1, 10) {
+			t.Fatalf("minute query used the wrong start: %s", r.URL.Query().Get("StartTime"))
+		}
+		_, _ = fmt.Fprintf(w, `{"Code":"200","Datapoints":"[{\"timestamp\":%d,\"Average\":80}]"}`, hour)
+	}))
+	defer server.Close()
+
+	service := &Service{CMS: &RPCClient{HTTPClient: server.Client(), Endpoint: server.URL, Version: "2019-01-01", Product: "Cms", AccessKey: "ak", Secret: "sk"}}
+	bytes, points, err := service.GetInstanceMonthlyTraffic(context.Background(), "cn-hongkong", "i-1", "", hour-1, hour+10*60*1000)
+	if err != nil || points != 1 || bytes != 600 {
 		t.Fatalf("monthly traffic: bytes=%v points=%d err=%v", bytes, points, err)
 	}
 }

@@ -367,6 +367,7 @@ func trafficFloat(value any) float64 {
 }
 
 func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, account *app.Account, now time.Time, threshold float64, thresholdAction, shutdownMode string, keepAlive, monthlyAutoStart bool) {
+	threshold = cloud.ProtectionThreshold(account.SiteType, threshold)
 	// Between refreshes, CMS comes from the ledger; the card shows CDT.
 	cmsTraffic := 0.0
 	if sample, err := w.Store.InstanceTrafficUsage(account.ID, account.InstanceID, now.Format("2006-01")); err == nil {
@@ -432,6 +433,7 @@ func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, a
 // applyTrafficProtection runs the same threshold and auto-start decisions
 // after a fresh CMS sample or after CMS failed and CDT supplied the fallback.
 func (w *Worker) applyTrafficProtection(ctx context.Context, client cloud.Client, account *app.Account, now time.Time, threshold float64, thresholdAction, shutdownMode string, cmsTraffic float64, cmsAvailable, keepAlive, monthlyAutoStart bool) bool {
+	threshold = cloud.ProtectionThreshold(account.SiteType, threshold)
 	protectionTraffic, protectionSource, available := w.protectionTrafficStatus(ctx, client, *account, cmsTraffic, cmsAvailable)
 	if !available {
 		account.ProtectionSuspended = true

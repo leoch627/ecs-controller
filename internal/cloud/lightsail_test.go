@@ -189,3 +189,12 @@ func TestNewClientPicksBackendBySiteType(t *testing.T) {
 		t.Fatal("Lightsail must support the account test")
 	}
 }
+
+func TestProtectionThresholdRunsAWSToFullAllowance(t *testing.T) {
+	if got := ProtectionThreshold(SiteAWS, 95); got != 100 {
+		t.Fatalf("AWS threshold=%v, want 100", got)
+	}
+	if got := ProtectionThreshold("international", 95); got != 95 {
+		t.Fatalf("Alibaba Cloud threshold=%v, want configured 95", got)
+	}
+}

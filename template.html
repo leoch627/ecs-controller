@@ -6075,6 +6075,7 @@
                                         <div class="settings-field">
                                             <label for="traffic-threshold">告警阈值 (%)</label>
                                             <input id="traffic-threshold" v-model.number="config.traffic_threshold" type="number" class="glass-input" min="1" max="100">
+                                            <p class="mt-1 text-xs text-[var(--muted)]">仅对阿里云生效，AWS Lightsail 固定按 100% 停机。</p>
                                         </div>
                                         <div class="settings-field">
                                             <label class="field-label">阈值动作</label>
