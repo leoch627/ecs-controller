@@ -914,9 +914,6 @@ func (s *Service) GetOutboundTrafficDelta(ctx context.Context, region, instanceI
 		}
 		lastErr = fmt.Errorf("%w: CMS metric %s returned no datapoints", ErrMetricNoData, candidate.name)
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("CMS returned no usable datapoints")
-	}
 	return 0, startMS, 0, "", lastErr
 }
 
@@ -1019,9 +1016,6 @@ func (s *Service) completedHourlyTraffic(ctx context.Context, instanceID, public
 			return bytes, covered, count, nil
 		}
 		lastErr = fmt.Errorf("%w: CMS metric %s returned no completed hourly datapoints", ErrMetricNoData, candidate.name)
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("%w: CMS returned no traffic datapoints", ErrMetricNoData)
 	}
 	return 0, 0, 0, lastErr
 }
