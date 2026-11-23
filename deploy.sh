@@ -42,9 +42,13 @@ export ECS_UPDATER_IMAGE_TAG="${ECS_UPDATER_IMAGE_TAG:-latest}"
 
 usage() {
     cat <<'EOF'
-Usage: ./deploy.sh [--no-build]
+Usage: ./deploy.sh [--no-build | --local-build]
 
 Pull prebuilt images and start ecs-controller with Docker Compose, then wait for /healthz.
+
+  --local-build  Build the controller image from this checkout on this machine
+                 instead of pulling it, for when no prebuilt image is published.
+                 Update the checkout first: git pull --ff-only && ./deploy.sh --local-build
 
 Environment:
   ECS_SETUP_TOKEN  One-time token used during first-run initialization.
@@ -52,9 +56,11 @@ EOF
 }
 
 no_build=0
+local_build=0
 case "${1:-}" in
     "") ;;
-    --no-build) no_build=1 ;; # Kept for compatibility; deployment never builds locally.
+    --no-build) no_build=1 ;; # Kept for compatibility; only --local-build builds.
+    --local-build) local_build=1 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
 esac
@@ -90,8 +96,30 @@ if [[ -z "${ECS_SETUP_TOKEN:-}" ]]; then
     generated_token=1
 fi
 
-echo "Pulling prebuilt ecs-controller images..."
-"${compose_cmd[@]}" pull
+if [[ "$local_build" -eq 1 ]]; then
+    if [[ -z "${ECS_COMMIT:-}" ]]; then
+        echo "--local-build needs a git checkout to name the image." >&2
+        exit 1
+    fi
+    if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain --untracked-files=no)" ]]; then
+        echo "Warning: the checkout has uncommitted changes; they are built into sha-$ECS_COMMIT." >&2
+    fi
+    # The tag names the commit, so a pin left in .env must follow it or the
+    # updater would recreate the container on the old image.
+    export ECS_IMAGE_TAG="sha-$ECS_COMMIT"
+    if [[ -f .env ]] && grep -q '^ECS_IMAGE_TAG=' .env; then
+        sed -i.bak "s|^ECS_IMAGE_TAG=.*|ECS_IMAGE_TAG=$ECS_IMAGE_TAG|" .env && rm -f .env.bak
+    fi
+    echo "Building $ECS_IMAGE_REPOSITORY:$ECS_IMAGE_TAG from this checkout..."
+    docker build -t "$ECS_IMAGE_REPOSITORY:$ECS_IMAGE_TAG" \
+        --build-arg ECS_VERSION="sha-$ECS_COMMIT" \
+        --build-arg ECS_COMMIT="$ECS_COMMIT" \
+        --build-arg ECS_BUILD_DATE="$ECS_BUILD_DATE" \
+        "$SCRIPT_DIR"
+else
+    echo "Pulling prebuilt ecs-controller images..."
+    "${compose_cmd[@]}" pull
+fi
 echo "Starting ecs-controller..."
 "${compose_cmd[@]}" up -d --no-build --remove-orphans
 

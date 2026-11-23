@@ -41,6 +41,12 @@ cd ~/ecs-controller
 ECS_COOKIE_SECURE=0 ./deploy.sh
 ```
 
+Docker Hub 上没有对应提交的镜像时（例如 GitHub Actions 不可用），可以在服务器上直接用当前代码构建：
+
+```bash
+git pull --ff-only && ./deploy.sh --local-build
+```
+
 在服务器的云安全组中放行 TCP `43211`，建议只允许自己的 IP 访问。初始化时以这次启动显示的 `Setup token` 为准。
 
 ### 3. 打开面板
