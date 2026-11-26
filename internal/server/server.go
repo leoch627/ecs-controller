@@ -376,6 +376,8 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 		s.checkInstanceIP(r.Context(), w, data)
 	case "set_instance_dns_name":
 		s.setInstanceDNSNames(w, data)
+	case "set_instance_traffic_limit":
+		s.setInstanceTrafficLimit(w, data)
 	case "test_ip_probe":
 		s.testIPProbe(w, data)
 	case "refresh_account", "sync_account_group", "restore_schedule_block":
@@ -756,20 +758,22 @@ func (s *Server) status(w http.ResponseWriter) {
 			}
 		}
 	}
+	globalThreshold := float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95))
 	data := make([]map[string]any, 0)
 	for _, a := range accounts {
 		if a.InstanceID == "" {
 			continue
 		}
 		percent := 0.0
-		if a.MaxTraffic > 0 {
-			percent = a.TrafficUsed / a.MaxTraffic * 100
+		maxTraffic := a.EffectiveMaxTraffic()
+		if maxTraffic > 0 {
+			percent = a.TrafficUsed / maxTraffic * 100
 		}
 		label := a.Remark
 		if label == "" {
 			label = a.AccessKeyID
 		}
-		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": a.MaxTraffic, "percentageOfUse": percent, "rate95": percent >= cloud.ProtectionThreshold(a.SiteType, float64(numberString(s.Store.GetSetting("traffic_threshold", ""), 95))), "maxTraffic": a.MaxTraffic, "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
+		data = append(data, map[string]any{"id": a.ID, "accountId": a.ID, "instanceId": a.InstanceID, "instanceName": a.InstanceName, "instanceType": a.InstanceType, "cpu": a.CPU, "memory": a.Memory, "osName": a.OSName, "region": a.RegionID, "regionId": a.RegionID, "regionName": a.RegionID, "status": a.InstanceStatus, "instanceStatus": a.InstanceStatus, "publicIp": a.PublicIP, "privateIp": a.PrivateIP, "trafficUsed": a.TrafficUsed, "flow_used": a.TrafficUsed, "flow_total": maxTraffic, "percentageOfUse": percent, "rate95": percent >= cloud.AccountProtectionThreshold(a.SiteType, a.TrafficThresholdOverride, globalThreshold), "maxTraffic": maxTraffic, "groupMaxTraffic": a.MaxTraffic, "trafficLimitOverride": a.TrafficLimitOverride, "trafficThresholdOverride": a.TrafficThresholdOverride, "effectiveThreshold": cloud.AccountProtectionThreshold(a.SiteType, a.TrafficThresholdOverride, globalThreshold), "globalThreshold": cloud.ProtectionThreshold(a.SiteType, globalThreshold), "remark": a.Remark, "accountLabel": label + " / " + a.RegionID, "groupKey": a.GroupKey, "healthStatus": a.HealthStatus, "trafficStatus": a.TrafficAPIStatus, "trafficMessage": a.TrafficAPIMessage, "internetMaxBandwidthOut": a.InternetBandwidth, "publicIpMode": a.PublicIPMode, "eipAllocationId": a.EIPAllocationID, "eipAddress": a.EIPAddress, "eipManaged": a.EIPManaged, "cloudPresence": a.CloudPresence, "missingSince": a.MissingSince, "operationLocked": a.IsDeleted == 1 || a.CloudPresence == "missing", "chargeType": expiries[a.InstanceID].ChargeType, "expiredAt": expiries[a.InstanceID].ExpiredAt, "expired": expiries[a.InstanceID].Expired(time.Now())})
 		item := data[len(data)-1]
 		item["siteType"] = a.SiteType
 		item["dnsInstanceKey"] = dns.InstanceKey(a)
@@ -1894,7 +1898,7 @@ func (s *Server) csrfOK(w http.ResponseWriter, r *http.Request) bool {
 }
 func (s *Server) mutating(a string) bool {
 	switch a {
-	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "check_instance_ip", "test_ip_probe", "set_instance_dns_name", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup", "test_dns", "retry_dns_cleanup":
+	case "save_config", "upload_logo", "clear_logs", "logout", "create_ecs", "control_instance", "delete_instance", "replace_instance_ip", "check_instance_ip", "test_ip_probe", "set_instance_dns_name", "set_instance_traffic_limit", "refresh_account", "sync_account_group", "sync_instances", "restore_schedule_block", "send_test_email", "send_test_telegram", "send_test_webhook", "start_update", "passkey_register_start", "passkey_register_finish", "create_backup", "restore_backup", "test_dns", "retry_dns_cleanup":
 		return true
 	}
 	return false

@@ -67,6 +67,20 @@ type Account struct {
 	MissingSince             int64
 	CloudPresence            string
 	IsDeleted                int
+	// Per-instance traffic protection overrides. Zero inherits the account
+	// group's MaxTraffic and the global threshold. They are written only by
+	// Store.SetTrafficOverride so group edits and worker saves keep them.
+	TrafficLimitOverride     float64
+	TrafficThresholdOverride float64
+}
+
+// EffectiveMaxTraffic is the allowance traffic protection measures this
+// instance against.
+func (a Account) EffectiveMaxTraffic() float64 {
+	if a.TrafficLimitOverride > 0 {
+		return a.TrafficLimitOverride
+	}
+	return a.MaxTraffic
 }
 
 type EcsTask struct {

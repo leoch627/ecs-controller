@@ -539,3 +539,46 @@ func TestInstanceTrafficSurvivesPublicIPChange(t *testing.T) {
 		t.Fatalf("sample=%+v err=%v", sample, err)
 	}
 }
+
+func TestTrafficOverrideSurvivesUpsertAndGroupEdit(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.UpsertAccount(app.Account{AccessKeyID: "ak", AccessKeySecret: "sk", RegionID: "cn-hongkong", GroupKey: "g", InstanceID: "i-1", MaxTraffic: 200}); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := s.LoadAccounts(false)
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("load: %#v %v", accounts, err)
+	}
+	stale := accounts[0]
+	if err := s.SetTrafficOverride(stale.ID, 50, 80); err != nil {
+		t.Fatal(err)
+	}
+	// A worker save from a copy loaded before the override must not clear it,
+	// and editing the group allowance must not overwrite it.
+	if err := s.UpsertAccount(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyGroupSettings(app.AccountGroup{GroupKey: "g", AccessKeyID: "ak", RegionID: "cn-hongkong", MaxTraffic: 300}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Account(stale.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TrafficLimitOverride != 50 || got.TrafficThresholdOverride != 80 || got.MaxTraffic != 300 || got.EffectiveMaxTraffic() != 50 {
+		t.Fatalf("override lost: %+v", *got)
+	}
+	if err := s.SetTrafficOverride(stale.ID, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.Account(stale.ID, false); got.EffectiveMaxTraffic() != 300 {
+		t.Fatalf("cleared override should inherit the group allowance: %+v", *got)
+	}
+	if err := s.SetTrafficOverride(9999, 1, 1); err == nil {
+		t.Fatal("missing account should fail")
+	}
+}

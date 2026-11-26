@@ -376,7 +376,7 @@ func (w *Worker) telegramInstances(page int) string {
 	}
 	lines = append(lines, "", fmt.Sprintf("选择实例  ·  第 %d/%d 页", page, total))
 	for _, account := range accounts[(page-1)*pageSize : minInt(page*pageSize, len(accounts))] {
-		lines = append(lines, "", statusIcon(account.InstanceStatus)+" "+instanceDisplayName(account), "📍 "+firstNonEmpty(account.RegionID, "未知区域"), "📦 "+formatTraffic(account.TrafficUsed, account.MaxTraffic), "🌐 "+firstNonEmpty(account.PublicIP, "暂无公网 IP"))
+		lines = append(lines, "", statusIcon(account.InstanceStatus)+" "+instanceDisplayName(account), "📍 "+firstNonEmpty(account.RegionID, "未知区域"), "📦 "+formatTraffic(account.TrafficUsed, account.EffectiveMaxTraffic()), "🌐 "+firstNonEmpty(account.PublicIP, "暂无公网 IP"))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -386,7 +386,7 @@ func (w *Worker) telegramInstance(id int64) string {
 	if err != nil {
 		return "🖥️ 实例不存在或已被清理。"
 	}
-	return fmt.Sprintf("🖥️ 实例详情\n\n%s\n%s %s  ·  %s\n\n🌐 公网 IP：%s\n⚙️ 规格：%s\n📦 %s\n🆔 实例 ID：%s\n🕒 最后同步：%s", instanceDisplayName(*a), statusIcon(a.InstanceStatus), statusLabel(a.InstanceStatus), firstNonEmpty(a.RegionID, "未知区域"), firstNonEmpty(a.PublicIP, "暂无"), firstNonEmpty(a.InstanceType, "未知"), formatTraffic(a.TrafficUsed, a.MaxTraffic), firstNonEmpty(a.InstanceID, "未知"), telegramUpdatedAt(a.UpdatedAt))
+	return fmt.Sprintf("🖥️ 实例详情\n\n%s\n%s %s  ·  %s\n\n🌐 公网 IP：%s\n⚙️ 规格：%s\n📦 %s\n🆔 实例 ID：%s\n🕒 最后同步：%s", instanceDisplayName(*a), statusIcon(a.InstanceStatus), statusLabel(a.InstanceStatus), firstNonEmpty(a.RegionID, "未知区域"), firstNonEmpty(a.PublicIP, "暂无"), firstNonEmpty(a.InstanceType, "未知"), formatTraffic(a.TrafficUsed, a.EffectiveMaxTraffic()), firstNonEmpty(a.InstanceID, "未知"), telegramUpdatedAt(a.UpdatedAt))
 }
 
 func (w *Worker) telegramReleaseConfirm(id int64, ttl time.Duration) string {

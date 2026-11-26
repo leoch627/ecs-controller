@@ -263,6 +263,7 @@ func (s *Store) migrate() error {
 		{"accounts", "auto_start_blocked", "INTEGER DEFAULT 0"}, {"accounts", "schedule_last_start_date", "TEXT DEFAULT ''"}, {"accounts", "schedule_last_stop_date", "TEXT DEFAULT ''"},
 		{"accounts", "schedule_stop_active", "INTEGER DEFAULT 0"},
 		{"accounts", "schedule_blocked_by_traffic", "INTEGER DEFAULT 0"}, {"accounts", "remark", "TEXT DEFAULT ''"}, {"accounts", "site_type", "TEXT DEFAULT 'international'"}, {"accounts", "group_key", "TEXT DEFAULT ''"}, {"accounts", "instance_name", "TEXT DEFAULT ''"}, {"accounts", "instance_type", "TEXT DEFAULT ''"}, {"accounts", "internet_max_bandwidth_out", "INTEGER DEFAULT 0"}, {"accounts", "public_ip", "TEXT DEFAULT ''"}, {"accounts", "public_ip_mode", "TEXT DEFAULT 'ecs_public_ip'"}, {"accounts", "eip_allocation_id", "TEXT DEFAULT ''"}, {"accounts", "eip_address", "TEXT DEFAULT ''"}, {"accounts", "eip_managed", "INTEGER DEFAULT 0"}, {"accounts", "private_ip", "TEXT DEFAULT ''"}, {"accounts", "cpu", "INTEGER DEFAULT 0"}, {"accounts", "memory", "INTEGER DEFAULT 0"}, {"accounts", "os_name", "TEXT DEFAULT ''"}, {"accounts", "stopped_mode", "TEXT DEFAULT ''"}, {"accounts", "health_status", "TEXT DEFAULT 'Unknown'"}, {"accounts", "traffic_api_status", "TEXT DEFAULT 'ok'"}, {"accounts", "traffic_api_message", "TEXT DEFAULT ''"}, {"accounts", "protection_suspended", "INTEGER DEFAULT 0"}, {"accounts", "protection_suspend_reason", "TEXT DEFAULT ''"}, {"accounts", "protection_suspend_notified_at", "INTEGER DEFAULT 0"}, {"accounts", "last_seen_at", "INTEGER DEFAULT 0"}, {"accounts", "missing_count", "INTEGER DEFAULT 0"}, {"accounts", "missing_since", "INTEGER DEFAULT 0"}, {"accounts", "cloud_presence", "TEXT DEFAULT 'present'"}, {"accounts", "is_deleted", "INTEGER DEFAULT 0"},
+		{"accounts", "traffic_limit_override", "REAL DEFAULT 0"}, {"accounts", "traffic_threshold_override", "REAL DEFAULT 0"},
 		{"instance_traffic_usage", "retired_bytes", "REAL DEFAULT 0"}, {"instance_traffic_usage", "ip_since_ms", "INTEGER DEFAULT 0"},
 	} {
 		if err := ensureColumn(s.DB, spec.table, spec.column, spec.definition); err != nil {
@@ -886,7 +887,8 @@ func (s *Store) LoadAccounts(includeDeleted bool) ([]app.Account, error) {
 		COALESCE(internet_max_bandwidth_out,0),COALESCE(public_ip,''),COALESCE(public_ip_mode,'ecs_public_ip'),COALESCE(eip_allocation_id,''),COALESCE(eip_address,''),COALESCE(eip_managed,0),
 		COALESCE(private_ip,''),COALESCE(cpu,0),COALESCE(memory,0),COALESCE(os_name,''),COALESCE(stopped_mode,''),COALESCE(health_status,'Unknown'),
 		COALESCE(traffic_api_status,'ok'),COALESCE(traffic_api_message,''),COALESCE(protection_suspended,0),COALESCE(protection_suspend_reason,''),COALESCE(protection_suspend_notified_at,0),
-		COALESCE(last_seen_at,0),COALESCE(missing_count,0),COALESCE(missing_since,0),COALESCE(cloud_presence,'present'),COALESCE(is_deleted,0)
+		COALESCE(last_seen_at,0),COALESCE(missing_count,0),COALESCE(missing_since,0),COALESCE(cloud_presence,'present'),COALESCE(is_deleted,0),
+		COALESCE(traffic_limit_override,0),COALESCE(traffic_threshold_override,0)
 		FROM accounts ` + where + ` ORDER BY COALESCE(region_id,''),COALESCE(remark,''),id`)
 	if err != nil {
 		return nil, err
@@ -896,7 +898,7 @@ func (s *Store) LoadAccounts(includeDeleted bool) ([]app.Account, error) {
 	for rows.Next() {
 		var a app.Account
 		var flags [8]int
-		err := rows.Scan(&a.ID, &a.AccessKeyID, &a.AccessKeySecret, &a.RegionID, &a.InstanceID, &a.MaxTraffic, &flags[0], &flags[1], &flags[2], &a.StartTime, &a.StopTime, &a.TrafficUsed, &a.TrafficBillingMonth, &a.InstanceStatus, &a.UpdatedAt, &a.LastKeepAliveAt, &flags[3], &a.ScheduleLastStartDate, &a.ScheduleLastStopDate, &flags[4], &flags[5], &a.Remark, &a.SiteType, &a.GroupKey, &a.InstanceName, &a.InstanceType, &a.InternetBandwidth, &a.PublicIP, &a.PublicIPMode, &a.EIPAllocationID, &a.EIPAddress, &flags[6], &a.PrivateIP, &a.CPU, &a.Memory, &a.OSName, &a.StoppedMode, &a.HealthStatus, &a.TrafficAPIStatus, &a.TrafficAPIMessage, &flags[7], &a.ProtectionSuspendReason, &a.ProtectionNotifiedAt, &a.LastSeenAt, &a.MissingCount, &a.MissingSince, &a.CloudPresence, &a.IsDeleted)
+		err := rows.Scan(&a.ID, &a.AccessKeyID, &a.AccessKeySecret, &a.RegionID, &a.InstanceID, &a.MaxTraffic, &flags[0], &flags[1], &flags[2], &a.StartTime, &a.StopTime, &a.TrafficUsed, &a.TrafficBillingMonth, &a.InstanceStatus, &a.UpdatedAt, &a.LastKeepAliveAt, &flags[3], &a.ScheduleLastStartDate, &a.ScheduleLastStopDate, &flags[4], &flags[5], &a.Remark, &a.SiteType, &a.GroupKey, &a.InstanceName, &a.InstanceType, &a.InternetBandwidth, &a.PublicIP, &a.PublicIPMode, &a.EIPAllocationID, &a.EIPAddress, &flags[6], &a.PrivateIP, &a.CPU, &a.Memory, &a.OSName, &a.StoppedMode, &a.HealthStatus, &a.TrafficAPIStatus, &a.TrafficAPIMessage, &flags[7], &a.ProtectionSuspendReason, &a.ProtectionNotifiedAt, &a.LastSeenAt, &a.MissingCount, &a.MissingSince, &a.CloudPresence, &a.IsDeleted, &a.TrafficLimitOverride, &a.TrafficThresholdOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -1105,6 +1107,20 @@ func (s *Store) UpdateScheduleExecutionState(id int64, action, date string) erro
 	}
 	_, err := s.DB.Exec(`UPDATE accounts SET `+column+`=? WHERE id=?`, date, id)
 	return err
+}
+
+// SetTrafficOverride stores one instance's traffic allowance (GB) and
+// threshold (%). Zero clears the override so the group/global value applies.
+// UpsertAccount deliberately leaves these columns alone.
+func (s *Store) SetTrafficOverride(id int64, limitGB, thresholdPercent float64) error {
+	result, err := s.DB.Exec(`UPDATE accounts SET traffic_limit_override=?,traffic_threshold_override=? WHERE id=?`, limitGB, thresholdPercent, id)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err == nil && n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) SetGroupScheduleBlocked(groupKey string, blocked bool) error {

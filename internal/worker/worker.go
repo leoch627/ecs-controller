@@ -367,7 +367,8 @@ func trafficFloat(value any) float64 {
 }
 
 func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, account *app.Account, now time.Time, threshold float64, thresholdAction, shutdownMode string, keepAlive, monthlyAutoStart bool) {
-	threshold = cloud.ProtectionThreshold(account.SiteType, threshold)
+	threshold = cloud.AccountProtectionThreshold(account.SiteType, account.TrafficThresholdOverride, threshold)
+	maxTraffic := account.EffectiveMaxTraffic()
 	// Between refreshes, CMS comes from the ledger; the card shows CDT.
 	cmsTraffic := 0.0
 	if sample, err := w.Store.InstanceTrafficUsage(account.ID, account.InstanceID, now.Format("2006-01")); err == nil {
@@ -386,10 +387,10 @@ func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, a
 	}
 	account.ProtectionSuspended, account.ProtectionSuspendReason = false, ""
 	usagePercent := 0.0
-	if account.MaxTraffic > 0 {
-		usagePercent = protectionTraffic / account.MaxTraffic * 100
+	if maxTraffic > 0 {
+		usagePercent = protectionTraffic / maxTraffic * 100
 	}
-	requiresProtection := account.MaxTraffic > 0 && usagePercent >= threshold
+	requiresProtection := maxTraffic > 0 && usagePercent >= threshold
 	if requiresProtection {
 		if thresholdAction == "stop_and_notify" && account.InstanceStatus == "Running" {
 			if err := client.StopInstance(ctx, account.RegionID, account.InstanceID, shutdownMode); err != nil {
@@ -433,7 +434,8 @@ func (w *Worker) runCachedAutomation(ctx context.Context, client cloud.Client, a
 // applyTrafficProtection runs the same threshold and auto-start decisions
 // after a fresh CMS sample or after CMS failed and CDT supplied the fallback.
 func (w *Worker) applyTrafficProtection(ctx context.Context, client cloud.Client, account *app.Account, now time.Time, threshold float64, thresholdAction, shutdownMode string, cmsTraffic float64, cmsAvailable, keepAlive, monthlyAutoStart bool) bool {
-	threshold = cloud.ProtectionThreshold(account.SiteType, threshold)
+	threshold = cloud.AccountProtectionThreshold(account.SiteType, account.TrafficThresholdOverride, threshold)
+	maxTraffic := account.EffectiveMaxTraffic()
 	protectionTraffic, protectionSource, available := w.protectionTrafficStatus(ctx, client, *account, cmsTraffic, cmsAvailable)
 	if !available {
 		account.ProtectionSuspended = true
@@ -444,10 +446,10 @@ func (w *Worker) applyTrafficProtection(ctx context.Context, client cloud.Client
 	}
 	account.ProtectionSuspended, account.ProtectionSuspendReason = false, ""
 	usagePercent := 0.0
-	if account.MaxTraffic > 0 {
-		usagePercent = protectionTraffic / account.MaxTraffic * 100
+	if maxTraffic > 0 {
+		usagePercent = protectionTraffic / maxTraffic * 100
 	}
-	requiresProtection := account.MaxTraffic > 0 && usagePercent >= threshold
+	requiresProtection := maxTraffic > 0 && usagePercent >= threshold
 	protectionAction := ""
 	if requiresProtection && thresholdAction == "stop_and_notify" && account.InstanceStatus == "Running" {
 		if err := client.StopInstance(ctx, account.RegionID, account.InstanceID, shutdownMode); err != nil {

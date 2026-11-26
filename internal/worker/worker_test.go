@@ -669,3 +669,38 @@ func TestCachedProtectionReadsCMSFromLedgerNotTheCard(t *testing.T) {
 		t.Fatalf("CMS over the threshold did not stop the instance (stopped=%d)", fake.stopped)
 	}
 }
+
+func TestProtectionUsesPerInstanceOverrides(t *testing.T) {
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	w := &Worker{Store: s}
+	// 120 GB of 200 GB is 60%: safe under the group allowance and 95% global
+	// threshold, so only an override can stop it.
+	cases := []struct {
+		name             string
+		limit, threshold float64
+		siteType         string
+		wantStopped      int
+	}{
+		{"inherits group and global", 0, 0, "", 0},
+		{"own allowance", 125, 0, "", 1},
+		{"own threshold", 0, 50, "", 1},
+		{"own threshold above usage", 0, 70, "", 0},
+		{"own threshold applies on AWS", 0, 50, cloud.SiteAWS, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeCloud{cdtTraffic: 120}
+			account := &app.Account{ID: 1, GroupKey: "g", RegionID: "cn-hongkong", InstanceID: "i-1", InstanceStatus: "Running", MaxTraffic: 200, SiteType: tc.siteType, TrafficLimitOverride: tc.limit, TrafficThresholdOverride: tc.threshold}
+			if !w.applyTrafficProtection(context.Background(), fake, account, time.Now(), 95, "stop_and_notify", "KeepCharging", 0, false, false, false) {
+				t.Fatal("protection unexpectedly unavailable")
+			}
+			if fake.stopped != tc.wantStopped {
+				t.Fatalf("stopped=%d, want %d", fake.stopped, tc.wantStopped)
+			}
+		})
+	}
+}

@@ -33,6 +33,15 @@ func ProtectionThreshold(siteType string, configured float64) float64 {
 	return configured
 }
 
+// AccountProtectionThreshold applies an instance's own threshold when one is
+// set. An explicit per-instance value wins on AWS too: the user chose it.
+func AccountProtectionThreshold(siteType string, override, configured float64) float64 {
+	if override > 0 {
+		return override
+	}
+	return ProtectionThreshold(siteType, configured)
+}
+
 // NewClient picks the cloud backend for an account's site type.
 func NewClient(accessKey, secret, region, siteType string) Client {
 	if siteType == SiteAWS {

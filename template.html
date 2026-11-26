@@ -5830,6 +5830,9 @@
                                                     :style="{ width: Math.min(inst.percentageOfUse, 100) + '%' }"></div>
                                             </div>
                                             <div v-if="hasTrafficIssue(inst)" class="mt-1 text-xs text-[#dc2626]">{{ trafficIssueText(inst) }}</div>
+                                            <div v-if="isAdmin" class="dns-name-line justify-center">
+                                                <button type="button" class="dns-name-edit" @click="openTrafficLimitDialog(inst)" :disabled="isRefreshingInstance(inst.id)" :title="trafficLimitTitle(inst)">{{ trafficLimitLabel(inst) }}</button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="summary-cell center-column">
@@ -5869,6 +5872,13 @@
                                     <div>
                                         <span class="text-[var(--muted)]">公网带宽峰值</span>
                                         <p class="mt-1 text-sm font-semibold">{{ formatPublicBandwidth(inst) }}</p>
+                                    </div>
+                                    <div style="grid-column: span 2 / span 2;">
+                                        <span class="text-[var(--muted)]">流量</span>
+                                        <p class="mt-1 text-sm font-semibold">{{ formatTrafficValue(inst.flow_used) }} / {{ inst.flow_total }} GB <span class="text-xs text-[var(--muted)]" style="font-weight: 400;">{{ formatPercent(inst.percentageOfUse) }}%</span></p>
+                                        <div v-if="isAdmin" class="dns-name-line">
+                                            <button type="button" class="dns-name-edit" @click="openTrafficLimitDialog(inst)" :disabled="isRefreshingInstance(inst.id)" :title="trafficLimitTitle(inst)">{{ trafficLimitLabel(inst) }}</button>
+                                        </div>
                                     </div>
                                 </div>
                                 <div v-if="inst.operationLocked || inst.instanceStatus === 'Releasing'" class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-700">
@@ -6705,6 +6715,22 @@
                 <div class="toast-message">{{ toast.message }}</div>
             </div>
         </transition-group>
+
+        <div v-if="trafficLimitDraft.open" class="dialog-overlay">
+            <div class="glass-panel dialog-card">
+                <p class="subtle-label">流量保护</p>
+                <h2 class="mt-2 text-2xl font-black">单独设置 {{ trafficLimitDraft.name }}</h2>
+                <p class="mt-4 text-sm leading-7 text-[#475569]">只对这台机器生效。留空或填 0 表示跟随账号的可用流量（{{ trafficLimitDraft.groupMaxTraffic }} GB）和全局阈值（{{ trafficLimitDraft.globalThreshold }}%）。</p>
+                <label class="mt-4 text-sm font-semibold" style="display: block;">可用流量（GB）</label>
+                <input v-model.trim="trafficLimitDraft.maxTraffic" type="number" min="0" step="any" class="glass-input mt-2" :placeholder="`跟随账号：${trafficLimitDraft.groupMaxTraffic}`" @keyup.enter="saveTrafficLimit">
+                <label class="mt-4 text-sm font-semibold" style="display: block;">告警阈值（%）</label>
+                <input v-model.trim="trafficLimitDraft.threshold" type="number" min="0" max="100" step="any" class="glass-input mt-2" :placeholder="`跟随全局：${trafficLimitDraft.globalThreshold}`" @keyup.enter="saveTrafficLimit">
+                <div class="dialog-actions">
+                    <button @click="trafficLimitDraft.open = false" class="ghost-button" :disabled="trafficLimitDraft.saving">取消</button>
+                    <button @click="saveTrafficLimit" class="solid-button" :disabled="trafficLimitDraft.saving">{{ trafficLimitDraft.saving ? '保存中...' : '保存' }}</button>
+                </div>
+            </div>
+        </div>
 
         <div v-if="dialogState.open" class="dialog-overlay">
             <div class="glass-panel dialog-card">
@@ -9390,6 +9416,59 @@
                     }
                 };
 
+                const trafficLimitDraft = ref({ open: false, saving: false, id: 0, name: '', maxTraffic: '', threshold: '', groupMaxTraffic: 0, globalThreshold: 0 });
+                const hasTrafficOverride = (inst) => Number(inst.trafficLimitOverride) > 0 || Number(inst.trafficThresholdOverride) > 0;
+                const trafficLimitLabel = (inst) => hasTrafficOverride(inst) ? `单独设置：${inst.flow_total} GB · ${Number(inst.effectiveThreshold)}%` : '流量保护';
+                const trafficLimitTitle = (inst) => `可用流量 ${inst.flow_total} GB${Number(inst.trafficLimitOverride) > 0 ? '（单独设置）' : '（跟随账号）'}，阈值 ${Number(inst.effectiveThreshold)}%${Number(inst.trafficThresholdOverride) > 0 ? '（单独设置）' : '（跟随全局）'}`;
+                const openTrafficLimitDialog = (inst) => {
+                    const limit = Number(inst.trafficLimitOverride) || 0;
+                    const threshold = Number(inst.trafficThresholdOverride) || 0;
+                    trafficLimitDraft.value = {
+                        open: true,
+                        saving: false,
+                        id: inst.id,
+                        name: inst.instanceName ? `${inst.instanceName}（${inst.instanceId}）` : inst.instanceId,
+                        maxTraffic: limit > 0 ? String(limit) : '',
+                        threshold: threshold > 0 ? String(threshold) : '',
+                        groupMaxTraffic: inst.groupMaxTraffic,
+                        globalThreshold: inst.globalThreshold
+                    };
+                };
+                const saveTrafficLimit = async () => {
+                    const draft = trafficLimitDraft.value;
+                    if (draft.saving) return;
+                    const maxTraffic = draft.maxTraffic === '' ? 0 : Number(draft.maxTraffic);
+                    const threshold = draft.threshold === '' ? 0 : Number(draft.threshold);
+                    if (!Number.isFinite(maxTraffic) || maxTraffic < 0) {
+                        openAlert('可用流量必须是不小于 0 的数字', 'error');
+                        return;
+                    }
+                    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+                        openAlert('告警阈值必须在 0 到 100 之间', 'error');
+                        return;
+                    }
+                    draft.saving = true;
+                    try {
+                        const res = await fetch('index.php?action=set_instance_traffic_limit', {
+                            method: 'POST',
+                            body: JSON.stringify({ accountId: draft.id, maxTraffic, threshold })
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.success) {
+                            openAlert(data.message || data.error || '保存流量保护设置失败', 'error');
+                            return;
+                        }
+                        draft.open = false;
+                        openAlert(data.message || '流量保护设置已保存', 'success');
+                        await Promise.all([fetchStatusData(false), fetchAllInstances(false, { silent: true })]);
+                    } catch (error) {
+                        console.error('Set traffic limit failed', error);
+                        openAlert('保存流量保护设置请求失败', 'error');
+                    } finally {
+                        draft.saving = false;
+                    }
+                };
+
                 const runLiveIpCheck = async (inst, visit, interactive) => {
                     const key = ipCheckKey(inst);
                     if (!visit || visit.inFlight.has(key)) return;
@@ -10812,6 +10891,11 @@
                     ipCheckBadge,
                     canCheckIp,
                     editInstanceDnsNames,
+                    trafficLimitDraft,
+                    openTrafficLimitDialog,
+                    saveTrafficLimit,
+                    trafficLimitLabel,
+                    trafficLimitTitle,
                     ddnsActive,
                     checkInstanceIp,
                     publicIpModeLabel,

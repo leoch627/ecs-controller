@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // These tables contain durable user data. Runtime sessions, jobs and one-time
@@ -102,7 +103,11 @@ func (s *Store) RestoreSnapshot(path string, encryptionKey [32]byte) error {
 		if _, err := tx.Exec(`DELETE FROM ` + table); err != nil {
 			return rollback(err)
 		}
-		if _, err := tx.Exec(`INSERT INTO ` + table + ` SELECT * FROM restore_source.` + table); err != nil {
+		columns, err := sharedColumns(tx, table)
+		if err != nil {
+			return rollback(err)
+		}
+		if _, err := tx.Exec(`INSERT INTO ` + table + `(` + columns + `) SELECT ` + columns + ` FROM restore_source.` + table); err != nil {
 			return rollback(err)
 		}
 	}
@@ -134,6 +139,35 @@ func (s *Store) RestoreSnapshot(path string, encryptionKey [32]byte) error {
 		return err
 	}
 	return s.migrateDNSHosts()
+}
+
+// sharedColumns lists the columns a table has in both the live database and
+// the attached snapshot. Copying by name lets a backup taken before a column
+// was added restore cleanly (the column keeps its default), and stays correct
+// when ALTER TABLE has placed columns in a different order than CREATE TABLE.
+func sharedColumns(tx *sql.Tx, table string) (string, error) {
+	rows, err := tx.Query(`SELECT live.name FROM pragma_table_info(?) AS live
+		WHERE live.name IN (SELECT name FROM pragma_table_info(?, 'restore_source'))
+		ORDER BY live.cid`, table, table)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return "", err
+		}
+		names = append(names, `"`+name+`"`)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("table %s has no columns in common with the snapshot", table)
+	}
+	return strings.Join(names, ","), nil
 }
 
 // BackupTables returns a copy for manifest and compatibility checks outside the
