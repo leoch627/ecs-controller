@@ -72,9 +72,11 @@ func (w *Worker) planDNSNames(accounts []app.Account, now time.Time) map[string]
 }
 
 // syncDNSNames points each held name at its holders' IPs: one holder is a
-// plain DDNS record, several are a round-robin set. A name whose holders
-// are all stopped keeps its last records; a name no machine holds any more
-// is deleted. Each name is handled on its own, so one failing provider never
+// plain DDNS record, several are a round-robin set. A name with no holder
+// that can serve (all stopped, expired or without a public IP) has its
+// records deleted, so it never points at a dead machine; it comes back as
+// soon as a holder runs again. A name no machine holds any more is deleted
+// and forgotten. Each name is handled on its own, so one failing provider never
 // blocks the others, and a failure backs off for poolRetryDelay.
 func (w *Worker) syncDNSNames(ctx context.Context, now time.Time) {
 	w.Store.DNSConfigMu.Lock()
@@ -104,9 +106,6 @@ func (w *Worker) syncDNSNames(ctx context.Context, now time.Time) {
 			break
 		}
 		plan := plans[name]
-		if plan != nil && len(plan.IPs) == 0 {
-			continue
-		}
 		domain, ok := settings.DomainFor(name)
 		if !ok {
 			continue
@@ -133,14 +132,19 @@ func (w *Worker) syncDNSNames(ctx context.Context, now time.Time) {
 		service, err := w.dnsService(scoped)
 		var added, removed int
 		if err == nil {
-			if plan == nil {
+			if len(ips) == 0 {
 				var deleted bool
 				if deleted, err = service.DeleteByName(ctx, name); err == nil {
-					delete(managed, name)
-					if deleted {
-						w.Store.AddLog("info", "已删除不再使用的解析 "+name)
+					if plan == nil {
+						delete(managed, name)
+						if deleted {
+							w.Store.AddLog("info", "已删除不再使用的解析 "+name)
+						}
+						continue
 					}
-					continue
+					if deleted {
+						w.Store.AddLog("info", "已删除解析 "+name+"：没有运行中的机器")
+					}
 				}
 			} else {
 				added, removed, err = service.SyncPool(ctx, name, ips)

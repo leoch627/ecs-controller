@@ -78,7 +78,8 @@ func TestSharedNameIsRoundRobinAndOwnNameIsDDNS(t *testing.T) {
 		t.Fatalf("shared name after swap=%s", got)
 	}
 
-	// A stopped machine leaves the shared name but keeps its own record.
+	// A stopped machine leaves the shared name, and a name whose machines
+	// are all stopped is deleted instead of pointing at a dead IP.
 	stopped := accounts[1]
 	stopped.InstanceStatus = "Stopped"
 	if err := s.UpsertAccount(stopped); err != nil {
@@ -93,8 +94,21 @@ func TestSharedNameIsRoundRobinAndOwnNameIsDDNS(t *testing.T) {
 	if got := poolRecords(cf, "lb.example.com"); got != "47.1.1.9" {
 		t.Fatalf("stopped machine stayed in shared name: %s", got)
 	}
+	if got := poolRecords(cf, "api.other.net"); got != "" {
+		t.Fatalf("name with only stopped machines still resolves: %s", got)
+	}
+	if _, ok := s.DNSManaged()["api.other.net"]; !ok {
+		t.Fatal("held name was forgotten after its records were deleted")
+	}
+
+	// The record comes back as soon as the machine runs again.
+	aws.InstanceStatus = "Running"
+	if err := s.UpsertAccount(aws); err != nil {
+		t.Fatal(err)
+	}
+	w.syncDNSNames(context.Background(), now.Add(2*time.Minute))
 	if got := poolRecords(cf, "api.other.net"); got != "13.1.1.3" {
-		t.Fatalf("stopped machine lost its own record: %s", got)
+		t.Fatalf("restarted machine did not get its record back: %s", got)
 	}
 }
 

@@ -6293,7 +6293,7 @@
 
                                     <div class="settings-subsection">
                                         <h4>机器解析</h4>
-                                        <p class="settings-hint">给每台机器单独设置解析名称，可以设多个。只有一台机器用的名称就指向这台机器（DDNS）；几台机器用同一个名称，就自动轮询（负载均衡）。没设名称的机器不会被写入任何解析。只有运行中、未到期的机器会写进解析；某个名称的机器全部停机时保留原记录，一台机器都不用的名称会被删除。修改立即生效，不需要点保存。Cloudflare 请保持「仅 DNS」。</p>
+                                        <p class="settings-hint">给每台机器单独设置解析名称，可以设多个。只有一台机器用的名称就指向这台机器（DDNS）；几台机器用同一个名称，就自动轮询（负载均衡）。没设名称的机器不会被写入任何解析。只有运行中、未到期的机器会写进解析；某个名称的机器全部停机时删除该名称的解析（恢复运行后自动重建），一台机器都不用的名称会被删除。修改立即生效，不需要点保存。Cloudflare 请保持「仅 DNS」。</p>
                                         <p v-if="!ddnsActive" class="settings-warning">请先添加根域名并保存，再给机器设置解析名称。</p>
                                         <ul v-else class="dns-host-list">
                                             <li v-for="inst in statusInstances" :key="inst.id" class="dns-host-item">
